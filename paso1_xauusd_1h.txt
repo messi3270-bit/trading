@@ -84,17 +84,19 @@ procesarZonas(array<Zona> arr) =>
             invalida = z.alcista ? close < z.bot : close > z.top
             // Reacción: la vela anterior tocó y esta vela va a favor
             reacciona = z.tocado and (z.alcista ? close > open : close < open)
+            borrar = false
             if invalida
-                borrarZona(z)
-                arr.remove(i)
+                borrar := true
             else if reacciona
                 // Solo vale una reacción: se marca con ✓ y se borra la zona
                 c = z.esFvg ? (z.alcista ? colFvgUp : colFvgDn) : (z.alcista ? colObUp : colObDn)
                 label.new(bar_index, z.alcista ? low : high, "✓ " + (z.esFvg ? "FVG" : "OB"), style = z.alcista ? label.style_label_up : label.style_label_down, color = color.new(c, 0), textcolor = color.white, size = size.tiny)
-                borrarZona(z)
-                arr.remove(i)
+                borrar := true
             else
                 z.tocado := toca
+            if borrar
+                borrarZona(z)
+                arr.remove(i)
 
 limitar(array<Zona> arr) =>
     while arr.size() > maxZonas
@@ -109,29 +111,23 @@ if niveles.size() > 0
         if not n.vivo
             niveles.remove(i)
             continue
-        manip = false
-        roto  = false
+        manip      = false
+        roto       = false
+        cerroFuera = false
+        // ¿La vela cierra dentro del nivel (por debajo del alto / por encima del bajo)?
+        dentro = n.esAlto ? close <= n.precio : close >= n.precio
         if n.estado == 0
-            if n.esAlto and high > n.precio
-                // Pasa el alto: si cierra dentro es manipulación con mecha
-                if close <= n.precio
-                    manip := true
-                else
-                    n.estado := 1
-            else if not n.esAlto and low < n.precio
-                // Pasa el bajo: si cierra dentro es manipulación con mecha
-                if close >= n.precio
-                    manip := true
-                else
-                    n.estado := 1
+            // Pasa el nivel: si cierra dentro es manipulación con mecha; si cierra fuera, empieza la cuenta
+            pasa = n.esAlto ? high > n.precio : low < n.precio
+            manip      := pasa and dentro
+            cerroFuera := pasa and not dentro
         else
             // Cerró fuera: tiene como máximo "maxVelas" velas para volver a cerrar dentro
             n.cuenta := n.cuenta + 1
-            volvio = n.esAlto ? close <= n.precio : close >= n.precio
-            if volvio
-                manip := true
-            else if n.cuenta >= maxVelas
-                roto := true
+            manip    := dentro
+            roto     := not dentro and n.cuenta >= maxVelas
+        if cerroFuera
+            n.estado := 1
         if manip
             n.ln.set_extend(extend.none)
             n.ln.set_x2(bar_index)
@@ -158,32 +154,26 @@ var Nivel ultAlto    = na
 var Nivel ultBajo    = na
 
 if not na(ph)
-    x = bar_index - pivLen
-    if ultimoTipo == 1
-        // Dos altos seguidos sin bajo en medio: se queda solo el más alto
-        if not na(ultAlto) and ph > ultAlto.precio
-            if ultAlto.vivo and ultAlto.estado == 0
-                ultAlto.ln.delete()
-                ultAlto.vivo := false
-            ultAlto := nuevoNivel(ph, true, x)
-            niveles.push(ultAlto)
-    else
-        ultAlto := nuevoNivel(ph, true, x)
+    // Dos altos seguidos sin bajo en medio: se queda solo el más alto
+    repetido = ultimoTipo == 1
+    agregar  = not repetido or ph > ultAlto.precio
+    if agregar
+        if repetido and ultAlto.vivo and ultAlto.estado == 0
+            ultAlto.ln.delete()
+            ultAlto.vivo := false
+        ultAlto := nuevoNivel(ph, true, bar_index - pivLen)
         niveles.push(ultAlto)
         ultimoTipo := 1
 
 if not na(pl)
-    x = bar_index - pivLen
-    if ultimoTipo == -1
-        // Dos bajos seguidos sin alto en medio: se queda solo el más bajo
-        if not na(ultBajo) and pl < ultBajo.precio
-            if ultBajo.vivo and ultBajo.estado == 0
-                ultBajo.ln.delete()
-                ultBajo.vivo := false
-            ultBajo := nuevoNivel(pl, false, x)
-            niveles.push(ultBajo)
-    else
-        ultBajo := nuevoNivel(pl, false, x)
+    // Dos bajos seguidos sin alto en medio: se queda solo el más bajo
+    repetido = ultimoTipo == -1
+    agregar  = not repetido or pl < ultBajo.precio
+    if agregar
+        if repetido and ultBajo.vivo and ultBajo.estado == 0
+            ultBajo.ln.delete()
+            ultBajo.vivo := false
+        ultBajo := nuevoNivel(pl, false, bar_index - pivLen)
         niveles.push(ultBajo)
         ultimoTipo := -1
 
