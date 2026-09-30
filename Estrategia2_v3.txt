@@ -1,0 +1,623 @@
+//@version=6
+// Estrategia 2 XAUUSD v3 (30 sep 2026)
+// 1H dirección (OB reaccionado / manipulación / vacío) -> 5m señal (manipulación u OB a favor) -> 1m entrada (OB nuevo)
+// Manipulación = barrida de un high/low de estructura que vuelve adentro (misma vela o vela contraria fuerte).
+// Si pasa un high/low y NO vuelve (quiebre real) en contra de la dirección, la dirección se descarta.
+// Usar SOLO en el gráfico de 1 minuto. Material educativo, no asesoría financiera.
+indicator("Estrategia 2 XAUUSD v3", shorttitle="Estrategia 2 v3", overlay=true, max_lines_count=500, max_labels_count=500)
+
+TZ = "America/New_York"
+
+// ================= INPUTS =================
+grpG = "General"
+pip = input.float(1.0, "Tamaño de 1 pip (XAUUSD = 1.00)", group=grpG)
+slPips = input.float(3.0, "Pips del SL (caso 1)", group=grpG)
+costPx = input.float(0.67, "Costo por operación (spread + comisión)", group=grpG)
+minRMult = input.float(2.0, "Riesgo mínimo = X veces el costo", group=grpG)
+
+grpS = "Estructura y manipulación"
+piv1H = input.int(2, "1H: velas a cada lado del high/low", minval=1, group=grpS)
+piv5 = input.int(2, "5m: velas a cada lado del high/low", minval=1, group=grpS)
+mitWin = input.int(2, "Velas para confirmar con vela contraria fuerte", minval=1, group=grpS)
+c2Win = input.int(12, "Velas máx. para manipulación de la manipulación", minval=1, group=grpS)
+blockPend = input.bool(true, "No entrar mientras 1H pasó un high/low en contra (en duda)", group=grpS)
+
+grpO = "Order blocks"
+strong1m = input.float(1.5, "1m: fuerza de ruptura (x cuerpo promedio 20)", group=grpO)
+strongHTF = input.float(1.5, "1H y 5m: fuerza de ruptura", group=grpO)
+obWithin = input.int(3, "Velas máx. entre la vela del OB y la ruptura", minval=1, group=grpO)
+obLook = input.int(30, "1m: velas máx. de vida del OB", minval=1, group=grpO)
+obLiq1H = input.bool(false, "1H: OB solo si antes tomó liquidez", group=grpO)
+
+grpD = "Qué da dirección y señal"
+use1HOB = input.bool(true, "1H: order block reaccionado", group=grpD)
+use1HMani = input.bool(true, "1H: manipulación", group=grpD)
+use1HFvg = input.bool(true, "1H: vacío (FVG) rechazado", group=grpD)
+use5OB = input.bool(true, "5m: order block", group=grpD)
+use5Mani = input.bool(true, "5m: manipulación", group=grpD)
+exp5 = input.int(12, "5m: la señal vence en (velas de 5m)", minval=1, group=grpD)
+
+grpT = "Breakeven y Take Profit"
+pivBT = input.int(3, "1m: velas a cada lado de los high/low", minval=1, group=grpT)
+tpMode = input.string("Video", "Take profit", options=["Video", "Fijo"], group=grpT)
+tpMin = input.float(2.5, "TP video: high/low más allá de (R)", group=grpT)
+tpMax = input.float(3.0, "TP tope (R)", group=grpT)
+tpFix = input.float(2.0, "TP fijo (R)", group=grpT)
+
+grpH = "Horario (hora Nueva York)"
+useSess = input.bool(true, "Filtrar por horario", group=grpH)
+useNY = input.bool(true, "Nueva York 6:30 – 12:00 (lun–vie)", group=grpH)
+useAsia = input.bool(true, "Asia (dom–jue)", group=grpH)
+asiaFrom = input.int(18, "Asia desde (hora)", minval=0, maxval=23, group=grpH)
+asiaTo = input.int(24, "Asia hasta (hora)", minval=1, maxval=24, group=grpH)
+
+grpP = "Plan diario"
+usePlan = input.bool(true, "Aplicar plan (máx. por día, parar tras TP o 3 SL seguidos)", group=grpP)
+maxDay = input.int(3, "Máx. operaciones por día", minval=1, group=grpP)
+
+// ================= FUNCIONES =================
+// Manipulación por estructura: barre un high/low de pivote vigente y vuelve adentro
+// (misma vela, o en las siguientes 'win' velas con una vela contraria de cuerpo >= al de la ruptura).
+// Si no vuelve -> quiebre real (brkUp / brkDn).
+f_mani(int pl, int win, int c2w) =>
+    var array<float> hs = array.new_float()
+    var array<float> ls = array.new_float()
+    float ph = ta.pivothigh(high, pl, pl)
+    float pv = ta.pivotlow(low, pl, pl)
+    if not na(ph)
+        array.push(hs, ph)
+        if array.size(hs) > 30
+            array.shift(hs)
+    if not na(pv)
+        array.push(ls, pv)
+        if array.size(ls) > 30
+            array.shift(ls)
+    float swH = na
+    float swL = na
+    if array.size(hs) > 0
+        for i = array.size(hs) - 1 to 0
+            float lv = array.get(hs, i)
+            if high > lv
+                swH := na(swH) ? lv : math.max(swH, lv)
+                array.remove(hs, i)
+    if array.size(ls) > 0
+        for i = array.size(ls) - 1 to 0
+            float lv = array.get(ls, i)
+            if low < lv
+                swL := na(swL) ? lv : math.min(swL, lv)
+                array.remove(ls, i)
+    float body = math.abs(close - open)
+    // --- lado bajista (barre un high) ---
+    var float pH = na
+    var float pHx = na
+    var float pHb = na
+    var int pHn = 0
+    bool beEvt = false
+    float beX = na
+    bool brkUp = false
+    if not na(swH)
+        if not na(pH)
+            brkUp := true
+        if close < swH
+            beEvt := true
+            beX := high
+            pH := na
+        else
+            pH := swH
+            pHx := high
+            pHb := body
+            pHn := 0
+    else if not na(pH)
+        pHn += 1
+        pHx := math.max(pHx, high)
+        if close < pH and close < open and body >= pHb
+            beEvt := true
+            beX := pHx
+            pH := na
+        else if pHn >= win
+            brkUp := close > pH
+            pH := na
+    // --- lado alcista (barre un low) ---
+    var float pL = na
+    var float pLx = na
+    var float pLb = na
+    var int pLn = 0
+    bool buEvt = false
+    float buX = na
+    bool brkDn = false
+    if not na(swL)
+        if not na(pL)
+            brkDn := true
+        if close > swL
+            buEvt := true
+            buX := low
+            pL := na
+        else
+            pL := swL
+            pLx := low
+            pLb := body
+            pLn := 0
+    else if not na(pL)
+        pLn += 1
+        pLx := math.min(pLx, low)
+        if close > pL and close > open and body >= pLb
+            buEvt := true
+            buX := pLx
+            pL := na
+        else if pLn >= win
+            brkDn := close < pL
+            pL := na
+    // --- manipulación de la manipulación (caso 2) ---
+    var float lastBuX = na
+    var int lastBuI = na
+    var float lastBeX = na
+    var int lastBeI = na
+    bool buC2 = false
+    bool beC2 = false
+    if buEvt
+        buC2 := not na(lastBuI) and bar_index - lastBuI <= c2w and buX < lastBuX
+        lastBuX := buX
+        lastBuI := bar_index
+    if beEvt
+        beC2 := not na(lastBeI) and bar_index - lastBeI <= c2w and beX > lastBeX
+        lastBeX := beX
+        lastBeI := bar_index
+    bool pendUp = not na(pH)
+    bool pendDn = not na(pL)
+    [buEvt, buX, buC2, beEvt, beX, beC2, brkUp, brkDn, pendUp, pendDn]
+
+// Order block: vela contraria -> vela fuerte cierra más allá de su cuerpo (hasta 'within' velas después)
+// -> el precio vuelve y toca el cuerpo (reacción) -> [modo entrada] primera vela que cierra más allá del cuerpo.
+// Se anula si una vela cierra al otro lado del cuerpo. Un solo uso.
+f_ob(bool bull, float mult, int within, bool needLiq, int maniBS, bool entryMode, int life) =>
+    float body = math.abs(close - open)
+    float avgB = ta.sma(body, 20)[1]
+    bool strong = body >= mult * avgB
+    var float cTop = na
+    var float cBot = na
+    var float cExt = na
+    var int cIdx = na
+    var int st = 0
+    var float oTop = na
+    var float oBot = na
+    var float oExt = na
+    var int oTime = na
+    var int oIdx = na
+    bool react = false
+    bool entry = false
+    bool isContra = bull ? close < open : close > open
+    if st > 0
+        oExt := bull ? math.min(oExt, low) : math.max(oExt, high)
+        bool broken = bull ? close < oBot : close > oTop
+        bool old = entryMode and bar_index - oIdx > life
+        if broken or old
+            st := 0
+        else
+            bool touch = bull ? low <= oTop : high >= oBot
+            if st == 1 and touch
+                st := 2
+                react := true
+            if st == 2 and entryMode
+                bool beyond = bull ? close > oTop : close < oBot
+                if beyond
+                    entry := true
+            if react and not entryMode
+                st := 0
+            if entry
+                st := 0
+    if not isContra and not na(cIdx) and st != 2 and not react and not entry
+        bool brk = bull ? close > cTop : close < cBot
+        int dist = bar_index - cIdx
+        bool liqOk = not needLiq or maniBS <= dist + 3
+        if brk and dist <= within and strong and liqOk
+            st := 1
+            oTop := cTop
+            oBot := cBot
+            oExt := bull ? math.min(cExt, low) : math.max(cExt, high)
+            oTime := time
+            oIdx := bar_index
+            cIdx := na
+    if isContra
+        cTop := math.max(open, close)
+        cBot := math.min(open, close)
+        cExt := bull ? low : high
+        cIdx := bar_index
+    else if not na(cIdx)
+        cExt := bull ? math.min(cExt, low) : math.max(cExt, high)
+    [react, entry, st, oTop, oBot, oExt, oTime]
+
+// Vacío (FVG) de 3 velas con liquidez tomada antes; da dirección cuando vuelve, toca y cierra por fuera a favor.
+f_fvg(bool bull, int maniBS) =>
+    var float zTop = na
+    var float zBot = na
+    var bool touched = false
+    bool evt = false
+    float inv = na
+    bool formed = bull ? low > high[2] : high < low[2]
+    if not na(zTop)
+        bool dead = bull ? close < zBot : close > zTop
+        if dead
+            zTop := na
+            zBot := na
+        else
+            bool tch = bull ? low <= zTop : high >= zBot
+            if tch
+                touched := true
+            bool out = bull ? close > zTop : close < zBot
+            if touched and out
+                evt := true
+                inv := bull ? zBot : zTop
+                zTop := na
+                zBot := na
+    if formed and maniBS <= 5
+        zTop := bull ? low : low[2]
+        zBot := bull ? high[2] : high
+        touched := false
+    [evt, inv]
+
+// Contexto 1H (solo velas cerradas)
+f_ctx1H() =>
+    [mBu, mBuX, mBuC2, mBe, mBeX, mBeC2, bUp, bDn, pUp, pDn] = f_mani(piv1H, mitWin, c2Win)
+    int bsBu = nz(ta.barssince(mBu), 9999)
+    int bsBe = nz(ta.barssince(mBe), 9999)
+    [obBuR, obBuE, obBuS, obBuT, obBuB, obBuX, obBuTm] = f_ob(true, strongHTF, obWithin, obLiq1H, bsBu, false, 0)
+    [obBeR, obBeE, obBeS, obBeT, obBeB, obBeX, obBeTm] = f_ob(false, strongHTF, obWithin, obLiq1H, bsBe, false, 0)
+    [fBu, fBuI] = f_fvg(true, bsBu)
+    [fBe, fBeI] = f_fvg(false, bsBe)
+    var int dir = 0
+    var int src = 0
+    var float inv = na
+    if dir == 1 and (close < inv or bDn)
+        dir := 0
+        src := 0
+    if dir == -1 and (close > inv or bUp)
+        dir := 0
+        src := 0
+    int nd = 0
+    int ns = 0
+    float ni = na
+    if use1HOB and obBuR
+        nd := 1
+        ns := 1
+        ni := obBuB
+    if use1HOB and obBeR
+        nd := -1
+        ns := 1
+        ni := obBeT
+    if use1HFvg and fBu
+        nd := 1
+        ns := 3
+        ni := fBuI
+    if use1HFvg and fBe
+        nd := -1
+        ns := 3
+        ni := fBeI
+    if use1HMani and mBu and not mBe
+        nd := 1
+        ns := 2
+        ni := mBuX
+    if use1HMani and mBe and not mBu
+        nd := -1
+        ns := 2
+        ni := mBeX
+    if nd != 0
+        dir := nd
+        src := ns
+        inv := ni
+    bool pend = (dir == 1 and pDn) or (dir == -1 and pUp)
+    [dir[1], src[1], inv[1], pend[1], time_close[1]]
+
+// Contexto 5m (solo velas cerradas)
+f_ctx5() =>
+    [mBu, mBuX, mBuC2, mBe, mBeX, mBeC2, bUp, bDn, pUp, pDn] = f_mani(piv5, mitWin, c2Win)
+    [obBuR, obBuE, obBuS, obBuT, obBuB, obBuX, obBuTm] = f_ob(true, strongHTF, obWithin, false, 9999, false, 0)
+    [obBeR, obBeE, obBeS, obBeT, obBeB, obBeX, obBeTm] = f_ob(false, strongHTF, obWithin, false, 9999, false, 0)
+    [mBu[1], mBuX[1], mBuC2[1], mBe[1], mBeX[1], mBeC2[1], bUp[1], bDn[1], obBuR[1], obBuB[1], obBeR[1], obBeT[1], close[1], time_close[1]]
+
+f_minAbove(array<float> a, float lv) =>
+    float r = na
+    for v in a
+        if v > lv and (na(r) or v < r)
+            r := v
+    r
+
+f_maxBelow(array<float> a, float lv) =>
+    float r = na
+    for v in a
+        if v < lv and (na(r) or v > r)
+            r := v
+    r
+
+f_sess() =>
+    int d = dayofweek(time, TZ)
+    int mins = hour(time, TZ) * 60 + minute(time, TZ)
+    bool wk = d >= dayofweek.monday and d <= dayofweek.friday
+    bool ny = useNY and wk and mins >= 390 and mins < 720
+    bool asiaDay = d == dayofweek.sunday or (d >= dayofweek.monday and d <= dayofweek.thursday)
+    bool asia = useAsia and asiaDay and mins >= asiaFrom * 60 and mins < asiaTo * 60
+    ny or asia
+
+// ================= CONTEXTO 1H y 5m =================
+[d1, s1, i1, p1, t1] = request.security(syminfo.tickerid, "60", f_ctx1H(), lookahead=barmerge.lookahead_on)
+[m5Bu, m5BuX, m5BuC2, m5Be, m5BeX, m5BeC2, b5Up, b5Dn, o5BuR, o5BuB, o5BeR, o5BeT, c5, t5] = request.security(syminfo.tickerid, "5", f_ctx5(), lookahead=barmerge.lookahead_on)
+
+bool new5 = not na(t5) and (na(t5[1]) or t5 != t5[1])
+
+// ================= PASO 2: señal de 5m =================
+var int sDir = 0
+var float sExt = na
+var float sInv = na
+var int sCase = 1
+var int sTime = na
+var bool sUsed = false
+var string sSrc = ""
+
+if sDir != 0 and d1 != sDir
+    sDir := 0
+if new5 and sDir == 1 and (c5 < sInv or b5Dn)
+    sDir := 0
+if new5 and sDir == -1 and (c5 > sInv or b5Up)
+    sDir := 0
+if sDir != 0 and time >= sTime + exp5 * 300000
+    sDir := 0
+
+if new5 and d1 == 1
+    bool mani = use5Mani and m5Bu
+    bool ob = use5OB and o5BuR
+    if mani or ob
+        sDir := 1
+        sTime := t5
+        sUsed := false
+        sExt := mani ? m5BuX : na
+        sInv := mani ? m5BuX : o5BuB
+        sCase := mani and m5BuC2 ? 2 : 1
+        sSrc := mani ? (m5BuC2 ? "manipulación de la manipulación" : "manipulación") : "order block"
+if new5 and d1 == -1
+    bool mani = use5Mani and m5Be
+    bool ob = use5OB and o5BeR
+    if mani or ob
+        sDir := -1
+        sTime := t5
+        sUsed := false
+        sExt := mani ? m5BeX : na
+        sInv := mani ? m5BeX : o5BeT
+        sCase := mani and m5BeC2 ? 2 : 1
+        sSrc := mani ? (m5BeC2 ? "manipulación de la manipulación" : "manipulación") : "order block"
+
+// ================= PASO 3: OB de 1m =================
+[r1Bu, e1Bu, st1Bu, top1Bu, bot1Bu, x1Bu, tm1Bu] = f_ob(true, strong1m, obWithin, false, 9999, true, obLook)
+[r1Be, e1Be, st1Be, top1Be, bot1Be, x1Be, tm1Be] = f_ob(false, strong1m, obWithin, false, 9999, true, obLook)
+
+// high/low vigentes de 1m para BE y TP
+var array<float> hs1 = array.new_float()
+var array<float> ls1 = array.new_float()
+float ph1 = ta.pivothigh(high, pivBT, pivBT)
+float pl1 = ta.pivotlow(low, pivBT, pivBT)
+if not na(ph1)
+    array.push(hs1, ph1)
+    if array.size(hs1) > 100
+        array.shift(hs1)
+if not na(pl1)
+    array.push(ls1, pl1)
+    if array.size(ls1) > 100
+        array.shift(ls1)
+if array.size(hs1) > 0
+    for i = array.size(hs1) - 1 to 0
+        if high > array.get(hs1, i)
+            array.remove(hs1, i)
+if array.size(ls1) > 0
+    for i = array.size(ls1) - 1 to 0
+        if low < array.get(ls1, i)
+            array.remove(ls1, i)
+
+// ================= Plan diario =================
+int dayKey = year(time, TZ) * 10000 + month(time, TZ) * 100 + dayofmonth(time, TZ)
+var int curDay = 0
+var int dTrades = 0
+var bool dTP = false
+var int dSLrow = 0
+var float dNet = 0.0
+if dayKey != curDay
+    curDay := dayKey
+    dTrades := 0
+    dTP := false
+    dSLrow := 0
+    dNet := 0.0
+
+// ================= Gestión de la operación abierta =================
+var int tDir = 0
+var float tE = na
+var float tSL = na
+var float tTP = na
+var float tBE = na
+var float tR = na
+var bool tBEd = false
+var int tBar = na
+var line lE = na
+var line lS = na
+var line lT = na
+var int nTP = 0
+var int nSL = 0
+var int nBE = 0
+var float netR = 0.0
+
+bool evSL = false
+bool evTP = false
+bool evBE = false
+bool evBEout = false
+bool closedNow = false
+
+if tDir != 0 and bar_index > tBar
+    bool hitSL = tDir == 1 ? low <= tSL : high >= tSL
+    bool hitTP = tDir == 1 ? high >= tTP : low <= tTP
+    float cR = costPx / tR
+    if hitSL
+        closedNow := true
+        if tBEd
+            evBEout := true
+            nBE += 1
+            netR += -cR
+            dNet += -cR
+            dSLrow := 0
+        else
+            evSL := true
+            nSL += 1
+            netR += -1.0 - cR
+            dNet += -1.0 - cR
+            dSLrow += 1
+    else if hitTP
+        closedNow := true
+        evTP := true
+        float g = math.abs(tTP - tE) / tR
+        nTP += 1
+        netR += g - cR
+        dNet += g - cR
+        dTP := true
+        dSLrow := 0
+    else if not tBEd and not na(tBE)
+        bool brkBE = tDir == 1 ? high > tBE : low < tBE
+        if brkBE
+            tBEd := true
+            tSL := tE
+            evBE := true
+            line.set_y1(lS, tE)
+            line.set_y2(lS, tE)
+    if closedNow
+        tDir := 0
+if tDir != 0
+    line.set_x2(lE, bar_index)
+    line.set_x2(lS, bar_index)
+    line.set_x2(lT, bar_index)
+
+// ================= Entrada =================
+bool inS = not useSess or f_sess()
+bool planOk = not usePlan or (dTrades < maxDay and not dTP and dSLrow < 3)
+bool pendOk = not (blockPend and p1)
+bool free = tDir == 0 and not closedNow
+float minR = minRMult * costPx
+
+// Compra
+float slBu = sCase == 2 and not na(sExt) ? math.min(sExt, x1Bu) : x1Bu - slPips * pip
+float rBu = close - slBu
+float tpcBu = f_minAbove(hs1, close + tpMin * rBu)
+float tpBu = tpMode == "Fijo" ? close + tpFix * rBu : (na(tpcBu) ? close + tpMax * rBu : math.min(tpcBu, close + tpMax * rBu))
+float beBu = f_minAbove(hs1, close + rBu)
+bool setBu = sDir == 1 and d1 == 1 and not sUsed and e1Bu and not na(tm1Bu) and not na(sTime) and tm1Bu >= sTime
+bool condBu = setBu and inS and planOk and pendOk and free and rBu >= minR
+
+// Venta
+float slBe = sCase == 2 and not na(sExt) ? math.max(sExt, x1Be) : x1Be + slPips * pip
+float rBe = slBe - close
+float tpcBe = f_maxBelow(ls1, close - tpMin * rBe)
+float tpBe = tpMode == "Fijo" ? close - tpFix * rBe : (na(tpcBe) ? close - tpMax * rBe : math.max(tpcBe, close - tpMax * rBe))
+float beBe = f_maxBelow(ls1, close - rBe)
+bool setBe = sDir == -1 and d1 == -1 and not sUsed and e1Be and not na(tm1Be) and not na(sTime) and tm1Be >= sTime
+bool condBe = setBe and inS and planOk and pendOk and free and rBe >= minR
+
+bool goBu = condBu and barstate.isconfirmed
+bool goBe = condBe and barstate.isconfirmed and not goBu
+
+f_open(int dir, float sl, float tp, float be, float r) =>
+    string t = (dir == 1 ? "COMPRA" : "VENTA") + "\nEntrada: " + str.tostring(close, "#.00") + "\nSL: " + str.tostring(sl, "#.00") + "\nBE: " + (na(be) ? "no hay" : str.tostring(be, "#.00")) + "\nTP: " + str.tostring(tp, "#.00") + " (" + str.tostring(math.abs(tp - close) / r, "#.0") + "R)"
+    label.new(bar_index, dir == 1 ? low : high, t, style=dir == 1 ? label.style_label_up : label.style_label_down, color=dir == 1 ? color.new(color.green, 10) : color.new(color.red, 10), textcolor=color.white, size=size.small)
+    t
+
+string entryMsg = ""
+if goBu or goBe
+    int dd = goBu ? 1 : -1
+    float sl = goBu ? slBu : slBe
+    float tp = goBu ? tpBu : tpBe
+    float be = goBu ? beBu : beBe
+    float r = goBu ? rBu : rBe
+    tDir := dd
+    tE := close
+    tSL := sl
+    tTP := tp
+    tR := r
+    tBE := not na(be) and (dd == 1 ? be < tp : be > tp) ? be : na
+    tBEd := false
+    tBar := bar_index
+    sUsed := true
+    dTrades += 1
+    entryMsg := f_open(dd, sl, tp, tBE, r)
+    lE := line.new(bar_index, close, bar_index + 1, close, color=color.gray, width=1)
+    lS := line.new(bar_index, sl, bar_index + 1, sl, color=color.red, width=1)
+    lT := line.new(bar_index, tp, bar_index + 1, tp, color=color.green, width=1)
+    alert("Estrategia 2: " + str.replace_all(entryMsg, "\n", " | "), alert.freq_once_per_bar_close)
+
+if evBE
+    alert("Estrategia 2: MOVER SL A BREAKEVEN (" + str.tostring(tE, "#.00") + ")", alert.freq_once_per_bar_close)
+if evTP
+    alert("Estrategia 2: TAKE PROFIT alcanzado", alert.freq_once_per_bar_close)
+if evSL
+    alert("Estrategia 2: STOP LOSS alcanzado", alert.freq_once_per_bar_close)
+
+alertcondition(goBu, "Entrada COMPRA", "Estrategia 2: ENTRAR EN COMPRA XAUUSD")
+alertcondition(goBe, "Entrada VENTA", "Estrategia 2: ENTRAR EN VENTA XAUUSD")
+alertcondition(evBE, "Mover a breakeven", "Estrategia 2: mover SL a breakeven")
+alertcondition(evTP, "Take profit", "Estrategia 2: TP alcanzado")
+alertcondition(evSL, "Stop loss", "Estrategia 2: SL alcanzado")
+
+// ================= Dibujo =================
+bgcolor(d1 == 1 ? color.new(color.green, 94) : d1 == -1 ? color.new(color.red, 94) : na, title="Dirección 1H")
+plot(st1Bu > 0 ? top1Bu : na, "OB 1m compra (arriba)", color=color.new(color.teal, 0), style=plot.style_linebr)
+plot(st1Bu > 0 ? bot1Bu : na, "OB 1m compra (abajo)", color=color.new(color.teal, 40), style=plot.style_linebr)
+plot(st1Be > 0 ? top1Be : na, "OB 1m venta (arriba)", color=color.new(color.orange, 40), style=plot.style_linebr)
+plot(st1Be > 0 ? bot1Be : na, "OB 1m venta (abajo)", color=color.new(color.orange, 0), style=plot.style_linebr)
+plotshape(goBu, "Compra", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(goBe, "Venta", shape.triangledown, location.abovebar, color.red, size=size.small)
+plotshape(new5 and sDir != 0 and sTime == t5, "Señal 5m", shape.diamond, location.top, color.yellow, size=size.tiny)
+
+// ================= Panel =================
+var table tb = table.new(position.top_right, 2, 9, border_width=1, bgcolor=color.new(color.black, 15))
+f_row(int r, string a, string b, color c) =>
+    table.cell(tb, 0, r, a, text_color=color.silver, text_size=size.small, text_halign=text.align_left)
+    table.cell(tb, 1, r, b, text_color=c, text_size=size.small, text_halign=text.align_left)
+
+if barstate.islast
+    string srcTxt = s1 == 1 ? "order block" : s1 == 2 ? "manipulación" : s1 == 3 ? "vacío" : "-"
+    string p1Txt = d1 == 1 ? "COMPRA (viene de " + srcTxt + ")" : d1 == -1 ? "VENTA (viene de " + srcTxt + ")" : "Sin señal"
+    if p1 and d1 != 0
+        p1Txt += " ⚠ en duda: pasó un " + (d1 == 1 ? "low" : "high") + " en contra"
+    color p1C = d1 == 1 ? color.lime : d1 == -1 ? color.red : color.gray
+    int minLeft = sDir != 0 ? math.round((sTime + exp5 * 300000 - time) / 60000) : 0
+    string p2Txt = sDir != 0 ? (sDir == 1 ? "COMPRA" : "VENTA") + " · " + sSrc + " · caso " + str.tostring(sCase) + " · vence en " + str.tostring(minLeft) + " min" + (sUsed ? " (ya usada)" : "") : "Esperando manipulación u OB a favor de 1H"
+    int st = sDir == 1 ? st1Bu : sDir == -1 ? st1Be : 0
+    int tm = sDir == 1 ? tm1Bu : tm1Be
+    bool fresh = not na(tm) and not na(sTime) and tm >= sTime
+    string p3Txt = sDir == 0 ? "-" : st == 0 ? "Buscando OB nuevo" : not fresh ? "OB anterior a la señal (no vale)" : st == 1 ? "OB creado: esperar que vuelva al cuerpo" : "OB tocado: esperar cierre más allá del cuerpo"
+    string todo = ""
+    color todoC = color.white
+    if tDir != 0
+        todo := bar_index - tBar <= 1 ? "ENTRAR EN " + (tDir == 1 ? "COMPRA" : "VENTA") + " ya (la vela de señal cerró)" : "Operación abierta: vigilar BE / TP / SL"
+        todoC := tDir == 1 ? color.lime : color.red
+    else if condBu or condBe
+        todo := "Vela cerrando…: confirmar al cierre (" + (condBu ? "COMPRA" : "VENTA") + ")"
+        todoC := color.yellow
+    else if timeframe.period != "1"
+        todo := "Poner el gráfico en 1 minuto"
+        todoC := color.orange
+    else if not inS
+        todo := "Fuera de horario: no operar"
+    else if not planOk
+        todo := "Plan del día cumplido: no operar más hoy"
+    else if d1 == 0
+        todo := "Esperar dirección en 1H"
+    else if not pendOk
+        todo := "1H en duda: esperar"
+    else if sDir == 0
+        todo := "Esperar señal en 5m a favor"
+    else if sUsed
+        todo := "Señal usada: esperar nueva señal de 5m"
+    else
+        todo := "Esperar OB nuevo en 1m"
+    string opTxt = tDir == 0 ? "Ninguna" : "E " + str.tostring(tE, "#.00") + " · SL " + str.tostring(tSL, "#.00") + " · BE " + (na(tBE) ? "no hay" : str.tostring(tBE, "#.00") + (tBEd ? " ✔" : "")) + " · TP " + str.tostring(tTP, "#.00")
+    f_row(0, "PASO 1 · 1H", p1Txt, p1C)
+    f_row(1, "PASO 2 · 5m", p2Txt, sDir == 1 ? color.lime : sDir == -1 ? color.red : color.gray)
+    f_row(2, "PASO 3 · 1m", p3Txt, color.white)
+    f_row(3, "▶ QUÉ HACER", todo, todoC)
+    f_row(4, "Operación", opTxt, color.white)
+    f_row(5, "Hoy", str.tostring(dTrades) + " ops · " + str.tostring(dNet, "#.00") + "R", color.white)
+    f_row(6, "Historial", "TP " + str.tostring(nTP) + " · SL " + str.tostring(nSL) + " · BE " + str.tostring(nBE) + " · Neto " + str.tostring(netR, "#.0") + "R", netR >= 0 ? color.lime : color.red)
+    int tot = nTP + nSL + nBE
+    f_row(7, "Acierto", tot > 0 ? str.tostring(100.0 * nTP / tot, "#.0") + "% de " + str.tostring(tot) + " ops" : "-", color.white)
