@@ -47,6 +47,9 @@ type Zona
     bool  esFvg
     bool  tocado = false  // la vela anterior tocó la zona (50 % en FVG, cuerpo en OB)
 
+// El paso 1 solo se dibuja en 1H. En cualquier otra temporalidad no se marca nada.
+esH1 = timeframe.period == "60"
+
 var array<Nivel> niveles = array.new<Nivel>()
 var array<Zona>  fvgs    = array.new<Zona>()
 var array<Zona>  obs     = array.new<Zona>()
@@ -153,7 +156,7 @@ var int   ultimoTipo = 0     // 1 = el último fue un alto, -1 = el último fue 
 var Nivel ultAlto    = na
 var Nivel ultBajo    = na
 
-if not na(ph)
+if esH1 and not na(ph)
     // Dos altos seguidos sin bajo en medio: se queda solo el más alto
     repetido = ultimoTipo == 1
     agregar  = not repetido or ph > ultAlto.precio
@@ -165,7 +168,7 @@ if not na(ph)
         niveles.push(ultAlto)
         ultimoTipo := 1
 
-if not na(pl)
+if esH1 and not na(pl)
     // Dos bajos seguidos sin alto en medio: se queda solo el más bajo
     repetido = ultimoTipo == -1
     agregar  = not repetido or pl < ultBajo.precio
@@ -193,7 +196,7 @@ procesarZonas(obs)
 // ...y luego se buscan los nuevos (así empiezan a contar desde la vela siguiente)
 
 // Vacíos de 3 velas
-if showFvg
+if showFvg and esH1
     if low > high[2]
         fvgs.push(nuevaZona(low, high[2], true, true, bar_index - 2))
     if high < low[2]
@@ -212,13 +215,13 @@ var float verdeL   = na
 
 // OB alcista: una vela cierra por encima del máximo de la última vela roja
 if not na(rojaIdx) and close > rojaH
-    if showOb
+    if showOb and esH1
         obs.push(nuevaZona(rojaO, rojaC, true, false, rojaIdx))
     rojaIdx := na
 
 // OB bajista: una vela cierra por debajo del mínimo de la última vela verde
 if not na(verdeIdx) and close < verdeL
-    if showOb
+    if showOb and esH1
         obs.push(nuevaZona(verdeC, verdeO, false, false, verdeIdx))
     verdeIdx := na
 
@@ -235,10 +238,3 @@ if close > open
     verdeO   := open
     verdeC   := close
     verdeL   := low
-
-// =====================================================================
-// AVISO SI NO ESTÁS EN 1H
-// =====================================================================
-var table aviso = table.new(position.top_right, 1, 1)
-if barstate.islast and timeframe.period != "60"
-    table.cell(aviso, 0, 0, "⚠ Este indicador está pensado para 1H", bgcolor = color.new(color.orange, 20), text_color = color.white)
