@@ -313,8 +313,8 @@ if close > open
 
 // =====================================================================
 // OBJETIVO DE LA DIRECCIÓN: el más cercano entre
-//   - compra: el siguiente alto por encima o el siguiente OB bajista por encima
-//   - venta:  el siguiente bajo por debajo o el siguiente OB alcista por debajo
+//   - compra: el siguiente alto, OB bajista o vacío bajista por encima
+//   - venta:  el siguiente bajo, OB alcista o vacío alcista por debajo
 // Devuelve [precio donde se llega, precio de cancelación, texto]
 // =====================================================================
 buscarObjetivo(int d) =>
@@ -339,6 +339,15 @@ buscarObjetivo(int d) =>
                 toque     := d == 1 ? z.bot : z.top
                 umbral    := d == 1 ? z.top : z.bot
                 txt       := (d == 1 ? "OB bajista " : "OB alcista ") + str.tostring(z.bot, format.mintick) + " – " + str.tostring(z.top, format.mintick)
+    for z in fvgs
+        if d == 1 ? (not z.alcista and z.bot > close) : (z.alcista and z.top < close)
+            dist = math.abs((d == 1 ? z.bot : z.top) - close)
+            if na(mejorDist) or dist < mejorDist
+                mejorDist := dist
+                // Llegar al vacío = tocarlo. Pasarlo = cerrar más allá de todo el vacío.
+                toque     := d == 1 ? z.bot : z.top
+                umbral    := d == 1 ? z.top : z.bot
+                txt       := (d == 1 ? "Vacío bajista " : "Vacío alcista ") + str.tostring(z.bot, format.mintick) + " – " + str.tostring(z.top, format.mintick)
     [toque, umbral, txt]
 
 if nuevaSenal
