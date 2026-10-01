@@ -286,20 +286,18 @@ if showFvg and esH1
 var int   rojaIdx  = na
 var float rojaO    = na
 var float rojaC    = na
-var float rojaH    = na
 var int   verdeIdx = na
 var float verdeO   = na
 var float verdeC   = na
-var float verdeL   = na
 
-// OB alcista: una vela cierra por encima del máximo de la última vela roja
-if not na(rojaIdx) and close > rojaH
+// OB alcista: una vela cierra por encima del CUERPO de la última vela roja (su apertura)
+if not na(rojaIdx) and close > rojaO
     if showOb and esH1
         obs.push(nuevaZona(rojaO, rojaC, true, false, rojaIdx))
     rojaIdx := na
 
-// OB bajista: una vela cierra por debajo del mínimo de la última vela verde
-if not na(verdeIdx) and close < verdeL
+// OB bajista: una vela cierra por debajo del CUERPO de la última vela verde (su apertura)
+if not na(verdeIdx) and close < verdeO
     if showOb and esH1
         obs.push(nuevaZona(verdeC, verdeO, false, false, verdeIdx))
     verdeIdx := na
@@ -311,12 +309,10 @@ if close < open
     rojaIdx := bar_index
     rojaO   := open
     rojaC   := close
-    rojaH   := high
 if close > open
     verdeIdx := bar_index
     verdeO   := open
     verdeC   := close
-    verdeL   := low
 
 // =====================================================================
 // OBJETIVO DE LA DIRECCIÓN: el más cercano entre
