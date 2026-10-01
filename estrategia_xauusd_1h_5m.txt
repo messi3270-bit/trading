@@ -268,17 +268,17 @@ motorDir() =>
 // =====================================================================
 // TEMPORALIDAD
 //   - 1H: paso 1 (se marca todo + panel de dirección)
-//   - Menos de 1H (5m, etc.): paso 2 (solo lo que va a favor de la dirección de 1H)
-//   - Más de 1H: no se marca nada
+//   - 5m: paso 2 (solo lo que va a favor de la dirección de 1H)
+//   - Cualquier otra temporalidad: no se marca nada
 // =====================================================================
 esH1    = timeframe.period == "60"
-esMenor = timeframe.isintraday and timeframe.in_seconds() < 3600
+esMenor = timeframe.period == "5"   // el paso 2 solo se dibuja en 5 minutos
 activo  = esH1 or esMenor
 
 // Dirección de la última vela CERRADA de 1H (no cambia a mitad de vela)
 dirHTF = nz(request.security(syminfo.tickerid, "60", motorDir()[1], lookahead = barmerge.lookahead_on))
 
-// ¿Se debe ver una zona / un nivel?  En 1H todo; en temporalidades menores solo lo que va a favor de 1H.
+// ¿Se debe ver una zona / un nivel?  En 1H todo; en 5m solo lo que va a favor de 1H.
 zonaVisible(bool alcista) =>
     esH1 or (dirHTF != 0 and dirHTF == (alcista ? 1 : -1))
 // En compra interesan los bajos (manipulación de bajo); en venta, los altos.
