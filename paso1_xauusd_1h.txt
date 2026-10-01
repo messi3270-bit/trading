@@ -115,6 +115,17 @@ limitar(array<Zona> arr) =>
 var int    dir1h    = 0     // 1 = compra, -1 = venta, 0 = todavía sin señal
 var string origen   = ""
 var int    tSenal   = na
+var float  objUmbral = na   // si una vela de 1H cierra más allá de este precio, la dirección se cancela
+var string objTxt    = ""
+nuevaSenal = false
+
+// La distribución puede llegar hasta el objetivo; si una vela CIERRA más allá, se cancela la dirección
+if dir1h != 0 and not na(objUmbral) and (dir1h == 1 ? close > objUmbral : close < objUmbral)
+    dir1h     := 0
+    origen    := "Cancelada: cerró más allá del objetivo"
+    tSenal    := time
+    objUmbral := na
+    objTxt    := ""
 
 // =====================================================================
 // 1) MANIPULACIONES SOBRE LOS ALTOS Y BAJOS ACTIVOS
@@ -153,6 +164,7 @@ if niveles.size() > 0
             dir1h  := n.esAlto ? -1 : 1
             origen := n.esAlto ? "Manipulación de alto" : "Manipulación de bajo"
             tSenal := time
+            nuevaSenal := true
             n.vivo := false
             niveles.remove(i)
         else if roto
@@ -210,11 +222,13 @@ if dirFvg != 0
     dir1h  := dirFvg
     origen := dirFvg == 1 ? "Reacción en vacío alcista" : "Reacción en vacío bajista"
     tSenal := time
+    nuevaSenal := true
 dirOb = procesarZonas(obs)
 if dirOb != 0
     dir1h  := dirOb
     origen := dirOb == 1 ? "Reacción en OB alcista" : "Reacción en OB bajista"
     tSenal := time
+    nuevaSenal := true
 
 // ...y luego se buscan los nuevos (así empiezan a contar desde la vela siguiente)
 
@@ -263,9 +277,41 @@ if close > open
     verdeL   := low
 
 // =====================================================================
+// OBJETIVO DE LA DIRECCIÓN: el más cercano entre
+//   - compra: el siguiente alto por encima o el siguiente OB bajista por encima
+//   - venta:  el siguiente bajo por debajo o el siguiente OB alcista por debajo
+// Devuelve [precio de cancelación, texto]
+// =====================================================================
+buscarObjetivo(int d) =>
+    float mejorDist = na
+    float umbral    = na
+    string txt      = "Sin objetivo a la vista"
+    for n in niveles
+        if n.vivo and (d == 1 ? (n.esAlto and n.precio > close) : (not n.esAlto and n.precio < close))
+            dist = math.abs(n.precio - close)
+            if na(mejorDist) or dist < mejorDist
+                mejorDist := dist
+                umbral    := n.precio
+                txt       := (d == 1 ? "Alto " : "Bajo ") + str.tostring(n.precio, format.mintick)
+    for z in obs
+        if d == 1 ? (not z.alcista and z.bot > close) : (z.alcista and z.top < close)
+            dist = math.abs((d == 1 ? z.bot : z.top) - close)
+            if na(mejorDist) or dist < mejorDist
+                mejorDist := dist
+                // Pasar el OB = cerrar por encima de su cuerpo (compra) o por debajo (venta)
+                umbral    := d == 1 ? z.top : z.bot
+                txt       := (d == 1 ? "OB bajista " : "OB alcista ") + str.tostring(z.bot, format.mintick) + " – " + str.tostring(z.top, format.mintick)
+    [umbral, txt]
+
+if nuevaSenal
+    [u, t] = buscarObjetivo(dir1h)
+    objUmbral := u
+    objTxt    := t
+
+// =====================================================================
 // PANEL CON LA DIRECCIÓN DE 1H (solo se ve en 1H)
 // =====================================================================
-var table panel = table.new(position.top_right, 1, 3, border_width = 1)
+var table panel = table.new(position.top_right, 1, 4, border_width = 1)
 if barstate.islast and esH1
     txt = dir1h == 1 ? "▲ COMPRA" : dir1h == -1 ? "▼ VENTA" : "Sin dirección"
     col = dir1h == 1 ? color.new(color.green, 10) : dir1h == -1 ? color.new(color.red, 10) : color.new(color.gray, 10)
@@ -273,3 +319,4 @@ if barstate.islast and esH1
     table.cell(panel, 0, 0, "Dirección 1H", bgcolor = color.new(color.black, 20), text_color = color.white, text_size = size.small)
     table.cell(panel, 0, 1, txt, bgcolor = col, text_color = color.white, text_size = size.large)
     table.cell(panel, 0, 2, det, bgcolor = color.new(color.black, 20), text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 3, dir1h != 0 ? "Objetivo: " + objTxt : "", bgcolor = color.new(color.black, 20), text_color = color.yellow, text_size = size.small)
