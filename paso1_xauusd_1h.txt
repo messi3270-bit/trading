@@ -122,7 +122,8 @@ limitar(array<Zona> arr) =>
 
 // =====================================================================
 // DIRECCIÓN DE 1H
-// Mientras una dirección está activa, las señales nuevas se ignoran.
+// Mientras una dirección está activa, se ignoran las señales a favor y las manipulaciones contrarias.
+// Una REACCIÓN contraria (en un vacío o en un OB) anula la dirección y pone la nueva.
 // La dirección termina cuando el precio llega al objetivo o una vela cierra más allá.
 // =====================================================================
 var int    dir1h    = 0     // 1 = compra, -1 = venta, 0 = todavía sin señal
@@ -256,7 +257,8 @@ while niveles.size() > maxNivel
 // 3) VACÍOS Y ORDER BLOCKS: primero se revisan los que ya existen...
 // =====================================================================
 [dirFvg, bordeFvg] = procesarZonas(fvgs)
-if dirFvg != 0 and libre
+// Una reacción CONTRARIA (vacío u OB) anula la dirección actual: empieza la distribución hacia el otro lado
+if dirFvg != 0 and (libre or dirFvg == -dir1h)
     dir1h      := dirFvg
     origen     := dirFvg == 1 ? "Reacción en vacío alcista" : "Reacción en vacío bajista"
     tSenal     := time
@@ -264,7 +266,7 @@ if dirFvg != 0 and libre
     nuevaSenal := true
     libre      := false
 [dirOb, bordeOb] = procesarZonas(obs)
-if dirOb != 0 and libre
+if dirOb != 0 and (libre or dirOb == -dir1h)
     dir1h      := dirOb
     origen     := dirOb == 1 ? "Reacción en OB alcista" : "Reacción en OB bajista"
     tSenal     := time
