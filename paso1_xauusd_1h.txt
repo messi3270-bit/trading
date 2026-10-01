@@ -110,22 +110,31 @@ limitar(array<Zona> arr) =>
         borrarZona(arr.shift())
 
 // =====================================================================
-// DIRECCIÓN DE 1H (la marca la última señal del paso 1)
+// DIRECCIÓN DE 1H
+// Mientras una dirección está activa, las señales nuevas se ignoran.
+// La dirección termina cuando el precio llega al objetivo o una vela cierra más allá.
 // =====================================================================
 var int    dir1h    = 0     // 1 = compra, -1 = venta, 0 = todavía sin señal
 var string origen   = ""
 var int    tSenal   = na
-var float  objUmbral = na   // si una vela de 1H cierra más allá de este precio, la dirección se cancela
+var float  objToque  = na   // precio donde el precio LLEGA al objetivo
+var float  objUmbral = na   // si una vela de 1H CIERRA más allá de este precio, la dirección se cancela
 var string objTxt    = ""
 nuevaSenal = false
 
-// La distribución puede llegar hasta el objetivo; si una vela CIERRA más allá, se cancela la dirección
-if dir1h != 0 and not na(objUmbral) and (dir1h == 1 ? close > objUmbral : close < objUmbral)
-    dir1h     := 0
-    origen    := "Cancelada: cerró más allá del objetivo"
-    tSenal    := time
-    objUmbral := na
-    objTxt    := ""
+if dir1h != 0 and not na(objUmbral)
+    cierraMas = dir1h == 1 ? close > objUmbral : close < objUmbral
+    llega     = dir1h == 1 ? high >= objToque : low <= objToque
+    if cierraMas or llega
+        origen    := cierraMas ? "Cancelada: cerró más allá del objetivo" : "Objetivo alcanzado"
+        dir1h     := 0
+        tSenal    := time
+        objToque  := na
+        objUmbral := na
+        objTxt    := ""
+
+// Solo se acepta una señal nueva si no hay dirección activa (o si la activa no tiene objetivo)
+libre = dir1h == 0 or na(objUmbral)
 
 // =====================================================================
 // 1) MANIPULACIONES SOBRE LOS ALTOS Y BAJOS ACTIVOS
@@ -161,10 +170,12 @@ if niveles.size() > 0
             n.ln.set_width(2)
             label.new(bar_index, n.precio, "M", style = n.esAlto ? label.style_label_down : label.style_label_up, color = colManip, textcolor = color.white, size = size.small)
             // Manipulación de un alto = venta. Manipulación de un bajo = compra.
-            dir1h  := n.esAlto ? -1 : 1
-            origen := n.esAlto ? "Manipulación de alto" : "Manipulación de bajo"
-            tSenal := time
-            nuevaSenal := true
+            if libre
+                dir1h      := n.esAlto ? -1 : 1
+                origen     := n.esAlto ? "Manipulación de alto" : "Manipulación de bajo"
+                tSenal     := time
+                nuevaSenal := true
+                libre      := false
             n.vivo := false
             niveles.remove(i)
         else if roto
@@ -218,17 +229,19 @@ while niveles.size() > maxNivel
 // 3) VACÍOS Y ORDER BLOCKS: primero se revisan los que ya existen...
 // =====================================================================
 dirFvg = procesarZonas(fvgs)
-if dirFvg != 0
-    dir1h  := dirFvg
-    origen := dirFvg == 1 ? "Reacción en vacío alcista" : "Reacción en vacío bajista"
-    tSenal := time
+if dirFvg != 0 and libre
+    dir1h      := dirFvg
+    origen     := dirFvg == 1 ? "Reacción en vacío alcista" : "Reacción en vacío bajista"
+    tSenal     := time
     nuevaSenal := true
+    libre      := false
 dirOb = procesarZonas(obs)
-if dirOb != 0
-    dir1h  := dirOb
-    origen := dirOb == 1 ? "Reacción en OB alcista" : "Reacción en OB bajista"
-    tSenal := time
+if dirOb != 0 and libre
+    dir1h      := dirOb
+    origen     := dirOb == 1 ? "Reacción en OB alcista" : "Reacción en OB bajista"
+    tSenal     := time
     nuevaSenal := true
+    libre      := false
 
 // ...y luego se buscan los nuevos (así empiezan a contar desde la vela siguiente)
 
@@ -280,10 +293,11 @@ if close > open
 // OBJETIVO DE LA DIRECCIÓN: el más cercano entre
 //   - compra: el siguiente alto por encima o el siguiente OB bajista por encima
 //   - venta:  el siguiente bajo por debajo o el siguiente OB alcista por debajo
-// Devuelve [precio de cancelación, texto]
+// Devuelve [precio donde se llega, precio de cancelación, texto]
 // =====================================================================
 buscarObjetivo(int d) =>
     float mejorDist = na
+    float toque     = na
     float umbral    = na
     string txt      = "Sin objetivo a la vista"
     for n in niveles
@@ -291,6 +305,7 @@ buscarObjetivo(int d) =>
             dist = math.abs(n.precio - close)
             if na(mejorDist) or dist < mejorDist
                 mejorDist := dist
+                toque     := n.precio
                 umbral    := n.precio
                 txt       := (d == 1 ? "Alto " : "Bajo ") + str.tostring(n.precio, format.mintick)
     for z in obs
@@ -298,13 +313,15 @@ buscarObjetivo(int d) =>
             dist = math.abs((d == 1 ? z.bot : z.top) - close)
             if na(mejorDist) or dist < mejorDist
                 mejorDist := dist
-                // Pasar el OB = cerrar por encima de su cuerpo (compra) o por debajo (venta)
+                // Llegar al OB = tocar su cuerpo. Pasarlo = cerrar más allá de todo el cuerpo.
+                toque     := d == 1 ? z.bot : z.top
                 umbral    := d == 1 ? z.top : z.bot
                 txt       := (d == 1 ? "OB bajista " : "OB alcista ") + str.tostring(z.bot, format.mintick) + " – " + str.tostring(z.top, format.mintick)
-    [umbral, txt]
+    [toque, umbral, txt]
 
 if nuevaSenal
-    [u, t] = buscarObjetivo(dir1h)
+    [tq, u, t] = buscarObjetivo(dir1h)
+    objToque  := tq
     objUmbral := u
     objTxt    := t
 
