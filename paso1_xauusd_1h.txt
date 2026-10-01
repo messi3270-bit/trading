@@ -355,6 +355,14 @@ if nuevaSenal
     objToque  := tq
     objUmbral := u
     objTxt    := t
+    // Si en la misma vela de la señal el precio ya llegó al objetivo, la distribución ya terminó
+    if not na(tq) and (dir1h == 1 ? high >= tq : low <= tq)
+        origen    := "Objetivo alcanzado"
+        dir1h     := 0
+        objOrigen := na
+        objToque  := na
+        objUmbral := na
+        objTxt    := ""
 
 // =====================================================================
 // PANEL CON LA DIRECCIÓN DE 1H (solo se ve en 1H)
