@@ -75,8 +75,10 @@ borrarZona(Zona z) =>
     if not na(z.mid)
         z.mid.delete()
 
-// Revisa cada zona activa: invalidación y reacción
+// Revisa cada zona activa: invalidación y reacción.
+// Devuelve la dirección de la reacción: 1 = compra, -1 = venta, 0 = ninguna
 procesarZonas(array<Zona> arr) =>
+    int dir = 0
     if arr.size() > 0
         for i = arr.size() - 1 to 0
             z   = arr.get(i)
@@ -94,16 +96,25 @@ procesarZonas(array<Zona> arr) =>
                 // Solo vale una reacción: se marca con ✓ y se borra la zona
                 c = z.esFvg ? (z.alcista ? colFvgUp : colFvgDn) : (z.alcista ? colObUp : colObDn)
                 label.new(bar_index, z.alcista ? low : high, "✓ " + (z.esFvg ? "FVG" : "OB"), style = z.alcista ? label.style_label_up : label.style_label_down, color = color.new(c, 0), textcolor = color.white, size = size.tiny)
+                dir    := z.alcista ? 1 : -1
                 borrar := true
             else
                 z.tocado := toca
             if borrar
                 borrarZona(z)
                 arr.remove(i)
+    dir
 
 limitar(array<Zona> arr) =>
     while arr.size() > maxZonas
         borrarZona(arr.shift())
+
+// =====================================================================
+// DIRECCIÓN DE 1H (la marca la última señal del paso 1)
+// =====================================================================
+var int    dir1h    = 0     // 1 = compra, -1 = venta, 0 = todavía sin señal
+var string origen   = ""
+var int    tSenal   = na
 
 // =====================================================================
 // 1) MANIPULACIONES SOBRE LOS ALTOS Y BAJOS ACTIVOS
@@ -138,6 +149,10 @@ if niveles.size() > 0
             n.ln.set_style(line.style_solid)
             n.ln.set_width(2)
             label.new(bar_index, n.precio, "M", style = n.esAlto ? label.style_label_down : label.style_label_up, color = colManip, textcolor = color.white, size = size.small)
+            // Manipulación de un alto = venta. Manipulación de un bajo = compra.
+            dir1h  := n.esAlto ? -1 : 1
+            origen := n.esAlto ? "Manipulación de alto" : "Manipulación de bajo"
+            tSenal := time
             n.vivo := false
             niveles.remove(i)
         else if roto
@@ -190,8 +205,16 @@ while niveles.size() > maxNivel
 // =====================================================================
 // 3) VACÍOS Y ORDER BLOCKS: primero se revisan los que ya existen...
 // =====================================================================
-procesarZonas(fvgs)
-procesarZonas(obs)
+dirFvg = procesarZonas(fvgs)
+if dirFvg != 0
+    dir1h  := dirFvg
+    origen := dirFvg == 1 ? "Reacción en vacío alcista" : "Reacción en vacío bajista"
+    tSenal := time
+dirOb = procesarZonas(obs)
+if dirOb != 0
+    dir1h  := dirOb
+    origen := dirOb == 1 ? "Reacción en OB alcista" : "Reacción en OB bajista"
+    tSenal := time
 
 // ...y luego se buscan los nuevos (así empiezan a contar desde la vela siguiente)
 
@@ -238,3 +261,15 @@ if close > open
     verdeO   := open
     verdeC   := close
     verdeL   := low
+
+// =====================================================================
+// PANEL CON LA DIRECCIÓN DE 1H (solo se ve en 1H)
+// =====================================================================
+var table panel = table.new(position.top_right, 1, 3, border_width = 1)
+if barstate.islast and esH1
+    txt = dir1h == 1 ? "▲ COMPRA" : dir1h == -1 ? "▼ VENTA" : "Sin dirección"
+    col = dir1h == 1 ? color.new(color.green, 10) : dir1h == -1 ? color.new(color.red, 10) : color.new(color.gray, 10)
+    det = na(tSenal) ? "Esperando la primera señal" : origen + "\n" + str.format_time(tSenal, "dd/MM HH:mm", syminfo.timezone)
+    table.cell(panel, 0, 0, "Dirección 1H", bgcolor = color.new(color.black, 20), text_color = color.white, text_size = size.small)
+    table.cell(panel, 0, 1, txt, bgcolor = col, text_color = color.white, text_size = size.large)
+    table.cell(panel, 0, 2, det, bgcolor = color.new(color.black, 20), text_color = color.white, text_size = size.small)
