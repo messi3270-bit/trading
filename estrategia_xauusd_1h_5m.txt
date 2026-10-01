@@ -1,5 +1,5 @@
 //@version=6
-indicator("Paso 1 · XAUUSD 1H · Manipulaciones, Vacíos y Order Blocks", shorttitle = "Paso 1 · 1H", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+indicator("Estrategia XAUUSD · Paso 1 (1H) + Paso 2 (5m)", shorttitle = "Paso 1+2", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
 
 // =====================================================================
 // AJUSTES
@@ -49,9 +49,243 @@ type Zona
     bool  esFvg
     bool  tocado = false  // la vela anterior tocó la zona (50 % en FVG, cuerpo en OB)
     int   dentro = 0      // velas seguidas dentro de la zona (solo se usa en OB)
+    color col    = na     // color de la zona (para poder ocultarla y volver a mostrarla)
 
-// El paso 1 solo se dibuja en 1H. En cualquier otra temporalidad no se marca nada.
-esH1 = timeframe.period == "60"
+// =====================================================================
+// MOTOR DE LA DIRECCIÓN DE 1H (sin dibujos)
+// Es una copia exacta de las reglas del paso 1, pero sin dibujar nada,
+// para poder calcular la dirección de 1H desde 5 minutos (o cualquier temporalidad menor).
+// =====================================================================
+type NivelP
+    float precio
+    bool  esAlto
+    int   estado  = 0
+    int   cuenta  = 0
+    float extremo = na
+    bool  vivo    = true
+
+type ZonaP
+    float top
+    float bot
+    bool  alcista
+    bool  esFvg
+    bool  tocado = false
+    int   dentro = 0
+
+procZonasP(array<ZonaP> arr) =>
+    int   dir   = 0
+    float borde = na
+    if arr.size() > 0
+        for i = arr.size() - 1 to 0
+            z    = arr.get(i)
+            mid  = (z.top + z.bot) / 2
+            toca = z.esFvg ? (z.alcista ? low <= mid : high >= mid) : (z.alcista ? low <= z.top : high >= z.bot)
+            invalida = z.alcista ? close < z.bot : close > z.top
+            enZona   = low <= z.top and high >= z.bot
+            z.dentro := enZona ? z.dentro + 1 : 0
+            atascado = not z.esFvg and z.dentro > maxDentro
+            aFavor    = z.alcista ? close > open : close < open
+            reacciona = aFavor and (toca or z.tocado)
+            borrar = false
+            if invalida or atascado
+                borrar := true
+            else if reacciona
+                dir    := z.alcista ? 1 : -1
+                borde  := z.alcista ? z.bot : z.top
+                borrar := true
+            else
+                z.tocado := toca
+            if borrar
+                arr.remove(i)
+    [dir, borde]
+
+objetivoP(int d, array<NivelP> nv, array<ZonaP> ob, array<ZonaP> fv) =>
+    float mejorDist = na
+    float toque     = na
+    float umbral    = na
+    for n in nv
+        if n.vivo and (d == 1 ? (n.esAlto and n.precio > close) : (not n.esAlto and n.precio < close))
+            dist = math.abs(n.precio - close)
+            if na(mejorDist) or dist < mejorDist
+                mejorDist := dist
+                toque     := n.precio
+                umbral    := n.precio
+    for z in ob
+        if d == 1 ? (not z.alcista and z.bot > close) : (z.alcista and z.top < close)
+            dist = math.abs((d == 1 ? z.bot : z.top) - close)
+            if na(mejorDist) or dist < mejorDist
+                mejorDist := dist
+                toque     := d == 1 ? z.bot : z.top
+                umbral    := d == 1 ? z.top : z.bot
+    for z in fv
+        if d == 1 ? (not z.alcista and z.bot > close) : (z.alcista and z.top < close)
+            dist = math.abs((d == 1 ? z.bot : z.top) - close)
+            if na(mejorDist) or dist < mejorDist
+                mejorDist := dist
+                toque     := d == 1 ? z.bot : z.top
+                umbral    := d == 1 ? z.top : z.bot
+    [toque, umbral]
+
+// Devuelve la dirección: 1 = compra, -1 = venta, 0 = sin dirección
+motorDir() =>
+    var array<NivelP> nv = array.new<NivelP>()
+    var array<ZonaP>  fv = array.new<ZonaP>()
+    var array<ZonaP>  ob = array.new<ZonaP>()
+    var int    dir     = 0
+    var float  oOrigen = na
+    var float  oToque  = na
+    var float  oUmbral = na
+    var int    ultTipo = 0
+    var NivelP uA      = na
+    var NivelP uB      = na
+    var int    rIdx    = na
+    var float  rO      = na
+    var float  rC      = na
+    var int    vIdx    = na
+    var float  vO      = na
+    var float  vC      = na
+    nueva = false
+    // Cancelaciones
+    if dir != 0 and not na(oOrigen) and (dir == 1 ? close < oOrigen : close > oOrigen)
+        dir     := 0
+        oOrigen := na
+        oToque  := na
+        oUmbral := na
+    if dir != 0 and not na(oUmbral)
+        if (dir == 1 ? close > oUmbral : close < oUmbral) or (dir == 1 ? high >= oToque : low <= oToque)
+            dir     := 0
+            oOrigen := na
+            oToque  := na
+            oUmbral := na
+    libre = dir == 0 or na(oUmbral)
+    // Manipulaciones
+    if nv.size() > 0
+        for i = nv.size() - 1 to 0
+            n = nv.get(i)
+            if not n.vivo
+                nv.remove(i)
+                continue
+            manip = false
+            roto  = false
+            cf    = false
+            dentro = n.esAlto ? close <= n.precio : close >= n.precio
+            if n.estado == 0
+                pasa = n.esAlto ? high > n.precio : low < n.precio
+                if pasa
+                    n.extremo := n.esAlto ? high : low
+                manip := pasa and dentro
+                cf    := pasa and not dentro
+            else
+                n.cuenta  := n.cuenta + 1
+                n.extremo := n.esAlto ? math.max(n.extremo, high) : math.min(n.extremo, low)
+                manip := dentro
+                roto  := not dentro and n.cuenta >= maxVelas
+            if cf
+                n.estado := 1
+            if manip or roto
+                dM = n.esAlto ? -1 : 1
+                if manip and (libre or dM == -dir)
+                    dir     := dM
+                    oOrigen := n.extremo
+                    nueva   := true
+                    libre   := false
+                n.vivo := false
+                nv.remove(i)
+    // Altos y bajos alternados
+    ph = ta.pivothigh(high, pivLen, pivLen)
+    pl = ta.pivotlow(low, pivLen, pivLen)
+    if not na(ph)
+        rep = ultTipo == 1
+        if not rep or ph > uA.precio
+            if rep and uA.vivo and uA.estado == 0
+                uA.vivo := false
+            uA := NivelP.new(ph, true)
+            nv.push(uA)
+            ultTipo := 1
+    if not na(pl)
+        rep = ultTipo == -1
+        if not rep or pl < uB.precio
+            if rep and uB.vivo and uB.estado == 0
+                uB.vivo := false
+            uB := NivelP.new(pl, false)
+            nv.push(uB)
+            ultTipo := -1
+    while nv.size() > maxNivel
+        v = nv.shift()
+        v.vivo := false
+    // Reacciones en vacíos y OB
+    [dF, bF] = procZonasP(fv)
+    if dF != 0 and (libre or dF == -dir)
+        dir     := dF
+        oOrigen := bF
+        nueva   := true
+        libre   := false
+    [dO, bO] = procZonasP(ob)
+    if dO != 0 and (libre or dO == -dir)
+        dir     := dO
+        oOrigen := bO
+        nueva   := true
+        libre   := false
+    // Vacíos nuevos
+    if showFvg
+        if low > high[2]
+            fv.push(ZonaP.new(low, high[2], true, true))
+        if high < low[2]
+            fv.push(ZonaP.new(low[2], high, false, true))
+    while fv.size() > maxZonas
+        fv.shift()
+    // OB nuevos
+    if not na(rIdx) and close > rO
+        if showOb
+            ob.push(ZonaP.new(rO, rC, true, false))
+        rIdx := na
+    if not na(vIdx) and close < vO
+        if showOb
+            ob.push(ZonaP.new(vC, vO, false, false))
+        vIdx := na
+    while ob.size() > maxZonas
+        ob.shift()
+    if close < open
+        rIdx := bar_index
+        rO   := open
+        rC   := close
+    if close > open
+        vIdx := bar_index
+        vO   := open
+        vC   := close
+    // Objetivo de la dirección nueva
+    if nueva
+        [tq, u] = objetivoP(dir, nv, ob, fv)
+        oToque  := tq
+        oUmbral := u
+        if not na(tq) and (dir == 1 ? high >= tq : low <= tq)
+            dir     := 0
+            oOrigen := na
+            oToque  := na
+            oUmbral := na
+    dir
+
+// =====================================================================
+// TEMPORALIDAD
+//   - 1H: paso 1 (se marca todo + panel de dirección)
+//   - Menos de 1H (5m, etc.): paso 2 (solo lo que va a favor de la dirección de 1H)
+//   - Más de 1H: no se marca nada
+// =====================================================================
+esH1    = timeframe.period == "60"
+esMenor = timeframe.isintraday and timeframe.in_seconds() < 3600
+activo  = esH1 or esMenor
+
+// Dirección de la última vela CERRADA de 1H (no cambia a mitad de vela)
+dirHTF = nz(request.security(syminfo.tickerid, "60", motorDir()[1], lookahead = barmerge.lookahead_on))
+
+// ¿Se debe ver una zona / un nivel?  En 1H todo; en temporalidades menores solo lo que va a favor de 1H.
+zonaVisible(bool alcista) =>
+    esH1 or (dirHTF != 0 and dirHTF == (alcista ? 1 : -1))
+// En compra interesan los bajos (manipulación de bajo); en venta, los altos.
+nivelVisible(bool esAlto) =>
+    esH1 or (dirHTF != 0 and dirHTF == (esAlto ? -1 : 1))
+
+transp = color.new(color.white, 100)
 
 var array<Nivel> niveles = array.new<Nivel>()
 var array<Zona>  fvgs    = array.new<Zona>()
@@ -61,8 +295,16 @@ var array<Zona>  obs     = array.new<Zona>()
 // FUNCIONES
 // =====================================================================
 nuevoNivel(float p, bool esAlto, int x) =>
-    ln = line.new(x, p, bar_index, p, color = colNivel, style = line.style_dotted, extend = extend.right)
+    ln = line.new(x, p, bar_index, p, color = nivelVisible(esAlto) ? colNivel : transp, style = line.style_dotted, extend = extend.right)
     Nivel.new(ln, p, esAlto, x)
+
+// Muestra u oculta una zona (oculta = colores transparentes)
+mostrarZona(Zona z, bool vis) =>
+    z.bx.set_bgcolor(vis ? z.col : color.new(z.col, 100))
+    z.bx.set_border_color(color.new(z.col, vis ? 40 : 100))
+    z.bx.set_text_color(color.new(z.col, vis ? 0 : 100))
+    if not na(z.mid)
+        z.mid.set_color(color.new(z.col, vis ? 0 : 100))
 
 nuevaZona(float top, float bot, bool alc, bool fvg, int x) =>
     c  = fvg ? (alc ? colFvgUp : colFvgDn) : (alc ? colObUp : colObDn)
@@ -71,7 +313,10 @@ nuevaZona(float top, float bot, bool alc, bool fvg, int x) =>
     if fvg
         // Línea del 50 % del vacío
         m := line.new(x, (top + bot) / 2, bar_index, (top + bot) / 2, color = color.new(c, 0), style = line.style_dashed, extend = extend.right)
-    Zona.new(bx, m, top, bot, alc, fvg)
+    z = Zona.new(bx, m, top, bot, alc, fvg, col = c)
+    if not zonaVisible(alc)
+        mostrarZona(z, false)
+    z
 
 borrarZona(Zona z) =>
     z.bx.delete()
@@ -105,7 +350,8 @@ procesarZonas(array<Zona> arr) =>
             else if reacciona
                 // Solo vale una reacción: se marca con ✓ y se borra la zona
                 c = z.esFvg ? (z.alcista ? colFvgUp : colFvgDn) : (z.alcista ? colObUp : colObDn)
-                label.new(bar_index, z.alcista ? low : high, "✓ " + (z.esFvg ? "FVG" : "OB"), style = z.alcista ? label.style_label_up : label.style_label_down, color = color.new(c, 0), textcolor = color.white, size = size.tiny)
+                if zonaVisible(z.alcista)
+                    label.new(bar_index, z.alcista ? low : high, "✓ " + (z.esFvg ? "FVG" : "OB"), style = z.alcista ? label.style_label_up : label.style_label_down, color = color.new(c, 0), textcolor = color.white, size = size.tiny)
                 dir    := z.alcista ? 1 : -1
                 borde  := z.alcista ? z.bot : z.top
                 borrar := true
@@ -190,12 +436,15 @@ if niveles.size() > 0
         if cerroFuera
             n.estado := 1
         if manip
-            n.ln.set_extend(extend.none)
-            n.ln.set_x2(bar_index)
-            n.ln.set_color(colManip)
-            n.ln.set_style(line.style_solid)
-            n.ln.set_width(2)
-            label.new(bar_index, n.precio, "M", style = n.esAlto ? label.style_label_down : label.style_label_up, color = colManip, textcolor = color.white, size = size.small)
+            if nivelVisible(n.esAlto)
+                label.new(bar_index, n.precio, "M", style = n.esAlto ? label.style_label_down : label.style_label_up, color = colManip, textcolor = color.white, size = size.small)
+                n.ln.set_extend(extend.none)
+                n.ln.set_x2(bar_index)
+                n.ln.set_color(colManip)
+                n.ln.set_style(line.style_solid)
+                n.ln.set_width(2)
+            else
+                n.ln.delete()
             // Manipulación de un alto = venta. Manipulación de un bajo = compra.
             // Una manipulación contraria anula la dirección actual y pone la nueva.
             dirM = n.esAlto ? -1 : 1
@@ -224,7 +473,7 @@ var int   ultimoTipo = 0     // 1 = el último fue un alto, -1 = el último fue 
 var Nivel ultAlto    = na
 var Nivel ultBajo    = na
 
-if esH1 and not na(ph)
+if activo and not na(ph)
     // Dos altos seguidos sin bajo en medio: se queda solo el más alto
     repetido = ultimoTipo == 1
     agregar  = not repetido or ph > ultAlto.precio
@@ -236,7 +485,7 @@ if esH1 and not na(ph)
         niveles.push(ultAlto)
         ultimoTipo := 1
 
-if esH1 and not na(pl)
+if activo and not na(pl)
     // Dos bajos seguidos sin alto en medio: se queda solo el más bajo
     repetido = ultimoTipo == -1
     agregar  = not repetido or pl < ultBajo.precio
@@ -254,6 +503,17 @@ while niveles.size() > maxNivel
     if viejo.vivo
         viejo.ln.delete()
         viejo.vivo := false
+
+// =====================================================================
+// PASO 2: cuando cambia la dirección de 1H, se muestran solo las zonas y niveles a favor
+// =====================================================================
+if esMenor and dirHTF != dirHTF[1]
+    for z in fvgs
+        mostrarZona(z, zonaVisible(z.alcista))
+    for z in obs
+        mostrarZona(z, zonaVisible(z.alcista))
+    for n in niveles
+        n.ln.set_color(nivelVisible(n.esAlto) ? colNivel : transp)
 
 // =====================================================================
 // 3) VACÍOS Y ORDER BLOCKS: primero se revisan los que ya existen...
@@ -279,7 +539,7 @@ if dirOb != 0 and (libre or dirOb == -dir1h)
 // ...y luego se buscan los nuevos (así empiezan a contar desde la vela siguiente)
 
 // Vacíos de 3 velas
-if showFvg and esH1
+if showFvg and activo
     if low > high[2]
         fvgs.push(nuevaZona(low, high[2], true, true, bar_index - 2))
     if high < low[2]
@@ -296,13 +556,13 @@ var float verdeC   = na
 
 // OB alcista: una vela cierra por encima del CUERPO de la última vela roja (su apertura)
 if not na(rojaIdx) and close > rojaO
-    if showOb and esH1
+    if showOb and activo
         obs.push(nuevaZona(rojaO, rojaC, true, false, rojaIdx))
     rojaIdx := na
 
 // OB bajista: una vela cierra por debajo del CUERPO de la última vela verde (su apertura)
 if not na(verdeIdx) and close < verdeO
-    if showOb and esH1
+    if showOb and activo
         obs.push(nuevaZona(verdeC, verdeO, false, false, verdeIdx))
     verdeIdx := na
 
