@@ -35,6 +35,7 @@ type Nivel
     int   x1
     int   estado = 0      // 0 = esperando, 1 = una vela cerró fuera (contando velas)
     int   cuenta = 0      // velas pasadas desde que cerró fuera
+    float extremo = na    // punta máxima (alto) o mínima (bajo) a la que llegó la manipulación
     bool  vivo   = true
 
 // Un vacío (FVG) o un order block
@@ -76,9 +77,11 @@ borrarZona(Zona z) =>
         z.mid.delete()
 
 // Revisa cada zona activa: invalidación y reacción.
-// Devuelve la dirección de la reacción: 1 = compra, -1 = venta, 0 = ninguna
+// Devuelve [dirección, borde de origen]: 1 = compra, -1 = venta, 0 = ninguna.
+// El borde de origen es el lado de la zona que, si se cierra más allá, cancela la dirección.
 procesarZonas(array<Zona> arr) =>
-    int dir = 0
+    int   dir   = 0
+    float borde = na
     if arr.size() > 0
         for i = arr.size() - 1 to 0
             z   = arr.get(i)
@@ -97,13 +100,14 @@ procesarZonas(array<Zona> arr) =>
                 c = z.esFvg ? (z.alcista ? colFvgUp : colFvgDn) : (z.alcista ? colObUp : colObDn)
                 label.new(bar_index, z.alcista ? low : high, "✓ " + (z.esFvg ? "FVG" : "OB"), style = z.alcista ? label.style_label_up : label.style_label_down, color = color.new(c, 0), textcolor = color.white, size = size.tiny)
                 dir    := z.alcista ? 1 : -1
+                borde  := z.alcista ? z.bot : z.top
                 borrar := true
             else
                 z.tocado := toca
             if borrar
                 borrarZona(z)
                 arr.remove(i)
-    dir
+    [dir, borde]
 
 limitar(array<Zona> arr) =>
     while arr.size() > maxZonas
@@ -117,10 +121,21 @@ limitar(array<Zona> arr) =>
 var int    dir1h    = 0     // 1 = compra, -1 = venta, 0 = todavía sin señal
 var string origen   = ""
 var int    tSenal   = na
+var float  objOrigen = na   // si una vela de 1H cierra más allá del origen de la señal (en contra), se cancela
 var float  objToque  = na   // precio donde el precio LLEGA al objetivo
 var float  objUmbral = na   // si una vela de 1H CIERRA más allá de este precio, la dirección se cancela
 var string objTxt    = ""
 nuevaSenal = false
+
+// Precio en contra: cierra más allá del punto donde nació la señal
+if dir1h != 0 and not na(objOrigen) and (dir1h == 1 ? close < objOrigen : close > objOrigen)
+    dir1h     := 0
+    origen    := "Cancelada: cerró más allá del origen de la señal"
+    tSenal    := time
+    objOrigen := na
+    objToque  := na
+    objUmbral := na
+    objTxt    := ""
 
 if dir1h != 0 and not na(objUmbral)
     cierraMas = dir1h == 1 ? close > objUmbral : close < objUmbral
@@ -129,6 +144,7 @@ if dir1h != 0 and not na(objUmbral)
         origen    := cierraMas ? "Cancelada: cerró más allá del objetivo" : "Objetivo alcanzado"
         dir1h     := 0
         tSenal    := time
+        objOrigen := na
         objToque  := na
         objUmbral := na
         objTxt    := ""
@@ -153,11 +169,14 @@ if niveles.size() > 0
         if n.estado == 0
             // Pasa el nivel: si cierra dentro es manipulación con mecha; si cierra fuera, empieza la cuenta
             pasa = n.esAlto ? high > n.precio : low < n.precio
+            if pasa
+                n.extremo := n.esAlto ? high : low
             manip      := pasa and dentro
             cerroFuera := pasa and not dentro
         else
             // Cerró fuera: tiene como máximo "maxVelas" velas para volver a cerrar dentro
-            n.cuenta := n.cuenta + 1
+            n.cuenta  := n.cuenta + 1
+            n.extremo := n.esAlto ? math.max(n.extremo, high) : math.min(n.extremo, low)
             manip    := dentro
             roto     := not dentro and n.cuenta >= maxVelas
         if cerroFuera
@@ -174,6 +193,7 @@ if niveles.size() > 0
                 dir1h      := n.esAlto ? -1 : 1
                 origen     := n.esAlto ? "Manipulación de alto" : "Manipulación de bajo"
                 tSenal     := time
+                objOrigen  := n.extremo
                 nuevaSenal := true
                 libre      := false
             n.vivo := false
@@ -228,18 +248,20 @@ while niveles.size() > maxNivel
 // =====================================================================
 // 3) VACÍOS Y ORDER BLOCKS: primero se revisan los que ya existen...
 // =====================================================================
-dirFvg = procesarZonas(fvgs)
+[dirFvg, bordeFvg] = procesarZonas(fvgs)
 if dirFvg != 0 and libre
     dir1h      := dirFvg
     origen     := dirFvg == 1 ? "Reacción en vacío alcista" : "Reacción en vacío bajista"
     tSenal     := time
+    objOrigen  := bordeFvg
     nuevaSenal := true
     libre      := false
-dirOb = procesarZonas(obs)
+[dirOb, bordeOb] = procesarZonas(obs)
 if dirOb != 0 and libre
     dir1h      := dirOb
     origen     := dirOb == 1 ? "Reacción en OB alcista" : "Reacción en OB bajista"
     tSenal     := time
+    objOrigen  := bordeOb
     nuevaSenal := true
     libre      := false
 
@@ -328,7 +350,7 @@ if nuevaSenal
 // =====================================================================
 // PANEL CON LA DIRECCIÓN DE 1H (solo se ve en 1H)
 // =====================================================================
-var table panel = table.new(position.top_right, 1, 4, border_width = 1)
+var table panel = table.new(position.top_right, 1, 5, border_width = 1)
 if barstate.islast and esH1
     txt = dir1h == 1 ? "▲ COMPRA" : dir1h == -1 ? "▼ VENTA" : "Sin dirección"
     col = dir1h == 1 ? color.new(color.green, 10) : dir1h == -1 ? color.new(color.red, 10) : color.new(color.gray, 10)
@@ -337,3 +359,5 @@ if barstate.islast and esH1
     table.cell(panel, 0, 1, txt, bgcolor = col, text_color = color.white, text_size = size.large)
     table.cell(panel, 0, 2, det, bgcolor = color.new(color.black, 20), text_color = color.white, text_size = size.small)
     table.cell(panel, 0, 3, dir1h != 0 ? "Objetivo: " + objTxt : "", bgcolor = color.new(color.black, 20), text_color = color.yellow, text_size = size.small)
+    inval = dir1h != 0 and not na(objOrigen) ? "Se cancela si cierra " + (dir1h == 1 ? "por debajo de " : "por encima de ") + str.tostring(objOrigen, format.mintick) : ""
+    table.cell(panel, 0, 4, inval, bgcolor = color.new(color.black, 20), text_color = color.orange, text_size = size.small)
