@@ -21,6 +21,7 @@ colObUp  = input.color(color.new(#FF9800, 80), "OB alcista", group = grpO)
 colObDn  = input.color(color.new(#E65100, 80), "OB bajista", group = grpO)
 
 grpG     = "General"
+maxDentro = input.int(4, "OB: máximo de velas seguidas dentro (si hay más, se invalida)", minval = 1, group = grpO)
 maxZonas = input.int(15, "Máximo de vacíos / OB activos (de cada tipo)", minval = 1, group = grpG)
 maxNivel = input.int(30, "Máximo de altos/bajos activos", minval = 2, group = grpG)
 
@@ -47,6 +48,7 @@ type Zona
     bool  alcista
     bool  esFvg
     bool  tocado = false  // la vela anterior tocó la zona (50 % en FVG, cuerpo en OB)
+    int   dentro = 0      // velas seguidas dentro de la zona (solo se usa en OB)
 
 // El paso 1 solo se dibuja en 1H. En cualquier otra temporalidad no se marca nada.
 esH1 = timeframe.period == "60"
@@ -90,10 +92,15 @@ procesarZonas(array<Zona> arr) =>
             toca = z.esFvg ? (z.alcista ? low <= mid : high >= mid) : (z.alcista ? low <= z.top : high >= z.bot)
             // Invalidación: una vela cierra al otro lado de la zona
             invalida = z.alcista ? close < z.bot : close > z.top
-            // Reacción: la vela anterior tocó y esta vela va a favor
-            reacciona = z.tocado and (z.alcista ? close > open : close < open)
+            // OB: si hay más de "maxDentro" velas seguidas dentro del cuerpo, no lo va a respetar: se invalida
+            enZona   = low <= z.top and high >= z.bot
+            z.dentro := enZona ? z.dentro + 1 : 0
+            atascado = not z.esFvg and z.dentro > maxDentro
+            // Reacción: la vela que toca cierra a favor, o la vela anterior tocó y esta cierra a favor
+            aFavor    = z.alcista ? close > open : close < open
+            reacciona = aFavor and (toca or z.tocado)
             borrar = false
-            if invalida
+            if invalida or atascado
                 borrar := true
             else if reacciona
                 // Solo vale una reacción: se marca con ✓ y se borra la zona
