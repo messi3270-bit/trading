@@ -903,7 +903,8 @@ if nuevaSenal
 // =====================================================================
 // PANEL CON LA DIRECCIÓN DE 1H (solo se ve en 1H)
 // =====================================================================
-var table panel = table.new(position.top_right, 1, 5, border_width = 1)
+// Solo se crea en 1H (dos tablas en la misma esquina se tapan entre sí)
+var table panel = esH1 ? table.new(position.top_right, 1, 5, border_width = 1) : na
 if barstate.islast and esH1
     txt = dir1h == 1 ? "▲ COMPRA" : dir1h == -1 ? "▼ VENTA" : "Sin dirección"
     col = dir1h == 1 ? color.new(color.green, 10) : dir1h == -1 ? color.new(color.red, 10) : color.new(color.gray, 10)
@@ -918,7 +919,8 @@ if barstate.islast and esH1
 // =====================================================================
 // PANEL DE ESTADO EN 1 MINUTO
 // =====================================================================
-var table panel1 = table.new(position.top_right, 1, 2, border_width = 1)
+// Solo se crea en 1 minuto (si no, tapa el panel de 1H)
+var table panel1 = esM1 ? table.new(position.top_right, 1, 2, border_width = 1) : na
 if barstate.islast and esM1
     dTxt = dirHTF == 1 ? "1H: ▲ COMPRA" : dirHTF == -1 ? "1H: ▼ VENTA" : "1H: sin dirección"
     dCol = dirHTF == 1 ? color.new(color.green, 10) : dirHTF == -1 ? color.new(color.red, 10) : color.new(color.gray, 10)
