@@ -1,5 +1,5 @@
 //@version=6
-indicator("Estrategia XAUUSD · Paso 1 (1H) + Paso 2 (5m) + Paso 3 (1m)", shorttitle = "Paso 1+2+3", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+indicator("Estrategia XAUUSD · Paso 1 (1H) + Paso 2 (5m) + Paso 3 (1m)", shorttitle = "Paso 1+2+3", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500, max_bars_back = 1000)
 
 // =====================================================================
 // AJUSTES
@@ -361,6 +361,7 @@ type OB1
     bool  tocado = false
     int   dentro = 0
     box   bx            // dibujo del OB de 1m (se quita al entrar o al invalidarse)
+    float ext           // stop loss: el low (compra) o high (venta) que dejó el OB, desde su vela hasta la entrada
 
 // Una entrada abierta: se marcan la entrada, el TP y el SL; se quitan al tocar el TP o el SL
 type Operacion
@@ -386,6 +387,13 @@ limpiarObs1() =>
     for o in obs1
         o.bx.delete()
     obs1.clear()
+
+// Mínimo (o máximo) desde la vela "idx" hasta la vela actual
+extremoDesde(int idx, bool minimo) =>
+    float e = na
+    for k = 0 to bar_index - idx
+        e := na(e) ? (minimo ? low[k] : high[k]) : (minimo ? math.min(e, low[k]) : math.max(e, high[k]))
+    e
 
 claveZona(int tipo, float t, float b) =>
     str.tostring(tipo) + "|" + str.tostring(t, "#.#####") + "|" + str.tostring(b, "#.#####")
@@ -733,6 +741,8 @@ if esM1
     if obs1.size() > 0
         for i = obs1.size() - 1 to 0
             o = obs1.get(i)
+            // El stop sigue el low (compra) o high (venta) que dejó el OB, hasta la vela de entrada
+            o.ext    := o.alcista ? math.min(o.ext, low) : math.max(o.ext, high)
             toca     = o.alcista ? low <= o.top : high >= o.bot
             invalida = o.alcista ? close < o.bot : close > o.top
             enZona   = low <= o.top and high >= o.bot
@@ -742,11 +752,8 @@ if esM1
             if invalida or o.dentro > maxDentro
                 borrar := true
             else if entra and dirHTF == (o.alcista ? 1 : -1)
-                // Stop loss: el extremo desde que se tocó la zona de 5m
-                float sl = na
-                for b in busquedas
-                    if b.dir == (o.alcista ? 1 : -1)
-                        sl := na(sl) ? b.extremo : (o.alcista ? math.min(sl, b.extremo) : math.max(sl, b.extremo))
+                // Stop loss: justo en el low (compra) o high (venta) que dejó el OB de 1m
+                sl = o.ext
                 riesgo = o.alcista ? close - sl : sl - close
                 if not na(sl) and riesgo > 0
                     tp = o.alcista ? close + 3 * riesgo : close - 3 * riesgo
@@ -808,7 +815,7 @@ var float verdeC   = na
 // OB alcista: una vela cierra por encima del CUERPO de la última vela roja (su apertura)
 if not na(rojaIdx) and close > rojaO
     if esM1 and hayBusqueda(1)
-        obs1.push(OB1.new(rojaO, rojaC, true, bx = box.new(rojaIdx, rojaO, bar_index, rojaC, border_color = color.new(colObUp, 0), bgcolor = colObUp, extend = extend.right, text = "OB 1m", text_size = size.tiny, text_color = color.new(colObUp, 0), text_halign = text.align_left)))
+        obs1.push(OB1.new(rojaO, rojaC, true, ext = extremoDesde(rojaIdx, true), bx = box.new(rojaIdx, rojaO, bar_index, rojaC, border_color = color.new(colObUp, 0), bgcolor = colObUp, extend = extend.right, text = "OB 1m", text_size = size.tiny, text_color = color.new(colObUp, 0), text_halign = text.align_left)))
     if showOb and activo
         obs.push(nuevaZona(rojaO, rojaC, true, false, rojaIdx))
     rojaIdx := na
@@ -816,7 +823,7 @@ if not na(rojaIdx) and close > rojaO
 // OB bajista: una vela cierra por debajo del CUERPO de la última vela verde (su apertura)
 if not na(verdeIdx) and close < verdeO
     if esM1 and hayBusqueda(-1)
-        obs1.push(OB1.new(verdeC, verdeO, false, bx = box.new(verdeIdx, verdeC, bar_index, verdeO, border_color = color.new(colObDn, 0), bgcolor = colObDn, extend = extend.right, text = "OB 1m", text_size = size.tiny, text_color = color.new(colObDn, 0), text_halign = text.align_left)))
+        obs1.push(OB1.new(verdeC, verdeO, false, ext = extremoDesde(verdeIdx, false), bx = box.new(verdeIdx, verdeC, bar_index, verdeO, border_color = color.new(colObDn, 0), bgcolor = colObDn, extend = extend.right, text = "OB 1m", text_size = size.tiny, text_color = color.new(colObDn, 0), text_halign = text.align_left)))
     if showOb and activo
         obs.push(nuevaZona(verdeC, verdeO, false, false, verdeIdx))
     verdeIdx := na
