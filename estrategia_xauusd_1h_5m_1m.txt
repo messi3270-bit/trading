@@ -361,8 +361,21 @@ type OB1
     bool  tocado = false
     int   dentro = 0
 
-var array<Busqueda> busquedas = array.new<Busqueda>()
-var array<OB1>      obs1      = array.new<OB1>()
+// Una entrada marcada: las cajas crecen hasta que el precio toca el stop o el take profit
+type Operacion
+    box   gana
+    box   pierde
+    float tp
+    float sl
+    bool  compra
+
+var array<Busqueda>  busquedas = array.new<Busqueda>()
+var array<OB1>       obs1      = array.new<OB1>()
+var array<Operacion> abiertas  = array.new<Operacion>()
+var array<string>    usadas    = array.new<string>()   // zonas de 5m que ya tuvieron su búsqueda
+
+claveZona(int tipo, float t, float b) =>
+    str.tostring(tipo) + "|" + str.tostring(t, "#.#####") + "|" + str.tostring(b, "#.#####")
 
 var array<Nivel> niveles = array.new<Nivel>()
 var array<Zona>  fvgs    = array.new<Zona>()
@@ -654,42 +667,51 @@ if esM1
     for b in busquedas
         b.extremo := b.dir == 1 ? math.min(b.extremo, low) : math.max(b.extremo, high)
 
-    // 3) ¿El precio toca ahora una zona de 5m a favor de 1H? Empieza una búsqueda nueva
-    if dirHTF != 0 and not na(z5Top)
+    // 3) Si no hay ninguna búsqueda activa: ¿el precio toca una zona de 5m a favor de 1H que no se haya usado?
+    //    Solo hay UNA búsqueda a la vez. Cada zona de 5m se usa una sola vez.
+    if busquedas.size() == 0 and dirHTF != 0 and not na(z5Top)
         if z5Top.size() > 0
             for i = 0 to z5Top.size() - 1
                 alc = z5Alc.get(i)
-                if alc == (dirHTF == 1)
+                if alc == (dirHTF == 1) and busquedas.size() == 0
                     t   = z5Top.get(i)
                     bt  = z5Bot.get(i)
                     fvg = z5Fvg.get(i)
                     mid = (t + bt) / 2
                     // OB: toca el cuerpo. Vacío: llega al 50 %.
-                    toca = fvg ? (alc ? low <= mid : high >= mid) : (alc ? low <= t : high >= bt)
-                    if toca
-                        existe = false
-                        for b in busquedas
-                            if b.tipo == (fvg ? 1 : 0) and b.top == t and b.bot == bt
-                                existe := true
-                        if not existe
-                            busquedas.push(Busqueda.new(dirHTF, fvg ? 1 : 0, t, bt, na, alc ? low : high, time))
-    if dirHTF != 0 and not na(n5Niv)
+                    toca  = fvg ? (alc ? low <= mid : high >= mid) : (alc ? low <= t : high >= bt)
+                    clave = claveZona(fvg ? 1 : 0, t, bt)
+                    if toca and not usadas.includes(clave)
+                        usadas.push(clave)
+                        busquedas.push(Busqueda.new(dirHTF, fvg ? 1 : 0, t, bt, na, alc ? low : high, time))
+    if busquedas.size() == 0 and dirHTF != 0 and not na(n5Niv)
         if n5Niv.size() > 0
             for i = 0 to n5Niv.size() - 1
                 nv5   = n5Niv.get(i)
                 alto5 = n5Alto.get(i)
+                clave = claveZona(2, nv5, nv5)
                 // Compra: pasa un poquito un bajo. Venta: pasa un poquito un alto.
-                if dirHTF == 1 ? (not alto5 and low < nv5) : (alto5 and high > nv5)
-                    existe = false
-                    for b in busquedas
-                        if b.tipo == 2 and b.nivel == nv5
-                            existe := true
-                    if not existe
-                        busquedas.push(Busqueda.new(dirHTF, 2, na, na, nv5, dirHTF == 1 ? low : high, time))
+                if busquedas.size() == 0 and not usadas.includes(clave) and (dirHTF == 1 ? (not alto5 and low < nv5) : (alto5 and high > nv5))
+                    usadas.push(clave)
+                    busquedas.push(Busqueda.new(dirHTF, 2, na, na, nv5, dirHTF == 1 ? low : high, time))
+    while usadas.size() > 200
+        usadas.shift()
     if busquedas.size() == 0
         obs1.clear()
 
-    // 4) OB de 1 minuto: el precio vuelve a tocarlo y la primera vela que cierra más allá del cuerpo es la entrada
+    // Las cajas de cada entrada crecen hasta que el precio toca el stop o el take profit
+    if abiertas.size() > 0
+        for i = abiertas.size() - 1 to 0
+            op     = abiertas.get(i)
+            cierra = op.compra ? (high >= op.tp or low <= op.sl) : (low <= op.tp or high >= op.sl)
+            op.gana.set_right(cierra ? bar_index : bar_index + 1)
+            op.pierde.set_right(cierra ? bar_index : bar_index + 1)
+            if cierra
+                abiertas.remove(i)
+
+    // 4) OB de 1 minuto: el precio vuelve a tocarlo y la primera vela que cierra más allá del cuerpo es la entrada.
+    //    Solo UNA entrada por zona de 5m: después de entrar, no se busca nada más hasta tocar otra zona.
+    entro = false
     if obs1.size() > 0
         for i = obs1.size() - 1 to 0
             o = obs1.get(i)
@@ -710,16 +732,23 @@ if esM1
                 riesgo = o.alcista ? close - sl : sl - close
                 if not na(sl) and riesgo > 0
                     tp = o.alcista ? close + 3 * riesgo : close - 3 * riesgo
-                    box.new(bar_index, tp, bar_index + 30, close, border_color = color.new(color.green, 30), bgcolor = color.new(color.green, 75))
-                    box.new(bar_index, close, bar_index + 30, sl, border_color = color.new(color.red, 30), bgcolor = color.new(color.red, 75))
+                    bGana   = box.new(bar_index, o.alcista ? tp : close, bar_index + 1, o.alcista ? close : tp, border_color = color.new(color.green, 30), bgcolor = color.new(color.green, 75))
+                    bPierde = box.new(bar_index, o.alcista ? close : sl, bar_index + 1, o.alcista ? sl : close, border_color = color.new(color.red, 30), bgcolor = color.new(color.red, 75))
+                    abiertas.push(Operacion.new(bGana, bPierde, tp, sl, o.alcista))
                     label.new(bar_index, o.alcista ? low : high, o.alcista ? "COMPRA" : "VENTA", style = o.alcista ? label.style_label_up : label.style_label_down, color = o.alcista ? color.green : color.red, textcolor = color.white, size = size.small)
                     entradaCompra := o.alcista
                     entradaVenta  := not o.alcista
+                    entro := true
                 borrar := true
             else
                 o.tocado := o.tocado or toca
             if borrar
                 obs1.remove(i)
+            if entro
+                break
+    if entro
+        busquedas.clear()
+        obs1.clear()
 
 // Actualiza la vela de 5m construida con velas de 1m
 if nueva5
