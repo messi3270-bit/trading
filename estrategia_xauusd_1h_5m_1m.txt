@@ -374,6 +374,7 @@ type Operacion
     float tp
     float sl
     bool  compra
+    label marca         // marca pequeña que se queda en el historial (▲/▼ con ✓ o ✗)
 
 var array<Busqueda>  busquedas = array.new<Busqueda>()
 var array<OB1>       obs1      = array.new<OB1>()
@@ -725,8 +726,13 @@ if esM1
     if abiertas.size() > 0
         for i = abiertas.size() - 1 to 0
             op     = abiertas.get(i)
-            cierra = op.compra ? (high >= op.tp or low <= op.sl) : (low <= op.tp or high >= op.sl)
+            tocaSl = op.compra ? low <= op.sl : high >= op.sl
+            tocaTp = op.compra ? high >= op.tp : low <= op.tp
+            cierra = tocaSl or tocaTp
             if cierra
+                // Historial: ✓ si tocó el TP, ✗ si tocó el SL (si toca los dos en la misma vela, cuenta como SL)
+                op.marca.set_text((op.compra ? "▲" : "▼") + (tocaSl ? " ✗" : " ✓"))
+                op.marca.set_color(tocaSl ? color.red : color.green)
                 op.lEnt.delete()
                 op.lTp.delete()
                 op.lSl.delete()
@@ -763,7 +769,8 @@ if esM1
                     eEnt = label.new(bar_index, close, (o.alcista ? "COMPRA " : "VENTA ") + str.tostring(close, format.mintick), style = label.style_label_right, color = color.blue, textcolor = color.white, size = size.small)
                     eTp  = label.new(bar_index, tp, "TP " + str.tostring(tp, format.mintick), style = label.style_label_right, color = color.green, textcolor = color.white, size = size.small)
                     eSl  = label.new(bar_index, sl, "SL " + str.tostring(sl, format.mintick), style = label.style_label_right, color = color.red, textcolor = color.white, size = size.small)
-                    abiertas.push(Operacion.new(lEnt, lTp, lSl, eEnt, eTp, eSl, tp, sl, o.alcista))
+                    marca = label.new(bar_index, o.alcista ? low : high, o.alcista ? "▲" : "▼", style = o.alcista ? label.style_label_up : label.style_label_down, color = color.blue, textcolor = color.white, size = size.tiny)
+                    abiertas.push(Operacion.new(lEnt, lTp, lSl, eEnt, eTp, eSl, tp, sl, o.alcista, marca))
                     entradaCompra := o.alcista
                     entradaVenta  := not o.alcista
                     entro := true
@@ -907,6 +914,26 @@ if barstate.islast and esH1
     table.cell(panel, 0, 3, dir1h != 0 ? "Objetivo: " + objTxt : "", bgcolor = color.new(color.black, 20), text_color = color.yellow, text_size = size.small)
     inval = dir1h != 0 and not na(objOrigen) ? "Se cancela si cierra " + (dir1h == 1 ? "por debajo de " : "por encima de ") + str.tostring(objOrigen, format.mintick) : ""
     table.cell(panel, 0, 4, inval, bgcolor = color.new(color.black, 20), text_color = color.orange, text_size = size.small)
+
+// =====================================================================
+// PANEL DE ESTADO EN 1 MINUTO
+// =====================================================================
+var table panel1 = table.new(position.top_right, 1, 2, border_width = 1)
+if barstate.islast and esM1
+    dTxt = dirHTF == 1 ? "1H: ▲ COMPRA" : dirHTF == -1 ? "1H: ▼ VENTA" : "1H: sin dirección"
+    dCol = dirHTF == 1 ? color.new(color.green, 10) : dirHTF == -1 ? color.new(color.red, 10) : color.new(color.gray, 10)
+    string est = ""
+    if abiertas.size() > 0
+        est := "Operación abierta (" + (abiertas.get(0).compra ? "COMPRA" : "VENTA") + ")"
+    else if busquedas.size() > 0
+        b0 = busquedas.get(0)
+        est := "Buscando OB de 1m en " + (b0.tipo == 0 ? "OB de 5m" : b0.tipo == 1 ? "vacío de 5m" : "manipulación de 5m")
+    else if dirHTF == 0
+        est := "Sin dirección en 1H: no se busca nada"
+    else
+        est := "Esperando que el precio toque una zona de 5m"
+    table.cell(panel1, 0, 0, dTxt, bgcolor = dCol, text_color = color.white, text_size = size.normal)
+    table.cell(panel1, 0, 1, est, bgcolor = color.new(color.black, 20), text_color = color.white, text_size = size.small)
 
 // Alertas opcionales: solo avisan si las activas tú en TradingView (Crear alerta → este indicador)
 alertcondition(entradaCompra, "Entrada COMPRA (1m)", "XAUUSD: entrada de COMPRA en 1 minuto")
