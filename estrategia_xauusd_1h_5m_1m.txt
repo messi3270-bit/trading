@@ -127,7 +127,7 @@ objetivoP(int d, array<NivelP> nv, array<ZonaP> ob, array<ZonaP> fv) =>
     [toque, umbral]
 
 // Devuelve la foto de la VELA ANTERIOR (cerrada) de esa temporalidad:
-// [dirección, techos, suelos, ¿alcista?, ¿es vacío?, niveles, ¿es alto?]
+// [dirección, techos, suelos, ¿alcista?, ¿es vacío?, niveles, ¿es alto?, dirección de la vela ACTUAL]
 // dirección: 1 = compra, -1 = venta, 0 = sin dirección
 motor() =>
     var array<NivelP> nv = array.new<NivelP>()
@@ -307,7 +307,7 @@ motor() =>
     pFvg  := cFvg
     pNiv  := cNiv
     pAlto := cAlto
-    [oDir, oTop, oBot, oAlc, oFvg, oNiv, oAlto]
+    [oDir, oTop, oBot, oAlc, oFvg, oNiv, oAlto, dir]
 
 // =====================================================================
 // TEMPORALIDAD
@@ -321,12 +321,14 @@ esMenor = timeframe.period == "5"   // el paso 2 solo se dibuja en 5 minutos
 activo  = esH1 or esMenor
 esM1    = timeframe.period == "1"
 
-// Dirección de la última vela CERRADA de 1H (no cambia a mitad de vela)
-[dir60, t60, b60, a60, f60, n60, e60] = request.security(syminfo.tickerid, "60", motor(), lookahead = barmerge.lookahead_on)
+// Dirección de 1H:
+//   - En el historial: la de la última vela de 1H CERRADA (no inventa señales del pasado)
+//   - En vivo: la de la vela de 1H que se está formando (en cuanto aparece la señal; puede cambiar antes del cierre)
+[d60a, t60, b60, a60, f60, n60, e60, dir60] = request.security(syminfo.tickerid, "60", motor(), lookahead = barmerge.lookahead_off)
 dirHTF = nz(dir60)
 
 // Zonas y niveles vivos de 5 minutos (de la última vela cerrada de 5m), para el paso 3
-[dir5, z5Top, z5Bot, z5Alc, z5Fvg, n5Niv, n5Alto] = request.security(syminfo.tickerid, "5", motor(), lookahead = barmerge.lookahead_on)
+[dir5, z5Top, z5Bot, z5Alc, z5Fvg, n5Niv, n5Alto, dir5v] = request.security(syminfo.tickerid, "5", motor(), lookahead = barmerge.lookahead_on)
 
 // ¿Se debe ver una zona / un nivel?  En 1H todo; en 5m solo lo que va a favor de 1H.
 zonaVisible(bool alcista) =>
