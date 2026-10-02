@@ -1,5 +1,5 @@
 //@version=6
-indicator("Estrategia XAUUSD · Paso 1 (1H) + Paso 2 (5m)", shorttitle = "Paso 1+2", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+indicator("Estrategia XAUUSD · Paso 1 (1H) + Paso 2 (5m) + Paso 3 (1m)", shorttitle = "Paso 1+2+3", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
 
 // =====================================================================
 // AJUSTES
@@ -126,8 +126,10 @@ objetivoP(int d, array<NivelP> nv, array<ZonaP> ob, array<ZonaP> fv) =>
                 umbral    := d == 1 ? z.top : z.bot
     [toque, umbral]
 
-// Devuelve la dirección: 1 = compra, -1 = venta, 0 = sin dirección
-motorDir() =>
+// Devuelve la foto de la VELA ANTERIOR (cerrada) de esa temporalidad:
+// [dirección, techos, suelos, ¿alcista?, ¿es vacío?, niveles, ¿es alto?]
+// dirección: 1 = compra, -1 = venta, 0 = sin dirección
+motor() =>
     var array<NivelP> nv = array.new<NivelP>()
     var array<ZonaP>  fv = array.new<ZonaP>()
     var array<ZonaP>  ob = array.new<ZonaP>()
@@ -263,20 +265,68 @@ motorDir() =>
             oOrigen := na
             oToque  := na
             oUmbral := na
-    dir
+    // Foto de la vela anterior: así, con lookahead, no repinta
+    var int          pDir  = 0
+    var array<float> pTop  = array.new<float>()
+    var array<float> pBot  = array.new<float>()
+    var array<bool>  pAlc  = array.new<bool>()
+    var array<bool>  pFvg  = array.new<bool>()
+    var array<float> pNiv  = array.new<float>()
+    var array<bool>  pAlto = array.new<bool>()
+    oDir  = pDir
+    oTop  = pTop
+    oBot  = pBot
+    oAlc  = pAlc
+    oFvg  = pFvg
+    oNiv  = pNiv
+    oAlto = pAlto
+    cTop  = array.new<float>()
+    cBot  = array.new<float>()
+    cAlc  = array.new<bool>()
+    cFvg  = array.new<bool>()
+    cNiv  = array.new<float>()
+    cAlto = array.new<bool>()
+    for z in fv
+        cTop.push(z.top)
+        cBot.push(z.bot)
+        cAlc.push(z.alcista)
+        cFvg.push(true)
+    for z in ob
+        cTop.push(z.top)
+        cBot.push(z.bot)
+        cAlc.push(z.alcista)
+        cFvg.push(false)
+    for n in nv
+        if n.vivo and n.estado == 0
+            cNiv.push(n.precio)
+            cAlto.push(n.esAlto)
+    pDir  := dir
+    pTop  := cTop
+    pBot  := cBot
+    pAlc  := cAlc
+    pFvg  := cFvg
+    pNiv  := cNiv
+    pAlto := cAlto
+    [oDir, oTop, oBot, oAlc, oFvg, oNiv, oAlto]
 
 // =====================================================================
 // TEMPORALIDAD
 //   - 1H: paso 1 (se marca todo + panel de dirección)
 //   - 5m: paso 2 (solo lo que va a favor de la dirección de 1H)
+//   - 1m: paso 3 (solo las entradas)
 //   - Cualquier otra temporalidad: no se marca nada
 // =====================================================================
 esH1    = timeframe.period == "60"
 esMenor = timeframe.period == "5"   // el paso 2 solo se dibuja en 5 minutos
 activo  = esH1 or esMenor
+esM1    = timeframe.period == "1"
 
 // Dirección de la última vela CERRADA de 1H (no cambia a mitad de vela)
-dirHTF = nz(request.security(syminfo.tickerid, "60", motorDir()[1], lookahead = barmerge.lookahead_on))
+[dir60, t60, b60, a60, f60, n60, e60] = request.security(syminfo.tickerid, "60", motor(), lookahead = barmerge.lookahead_on)
+dirHTF = nz(dir60)
+
+// Zonas y niveles vivos de 5 minutos (de la última vela cerrada de 5m), para el paso 3
+[dir5, z5Top, z5Bot, z5Alc, z5Fvg, n5Niv, n5Alto] = request.security(syminfo.tickerid, "5", motor(), lookahead = barmerge.lookahead_on)
 
 // ¿Se debe ver una zona / un nivel?  En 1H todo; en 5m solo lo que va a favor de 1H.
 zonaVisible(bool alcista) =>
@@ -286,6 +336,33 @@ nivelVisible(bool esAlto) =>
     esH1 or (dirHTF != 0 and dirHTF == (esAlto ? -1 : 1))
 
 transp = color.new(color.white, 100)
+
+// =====================================================================
+// PASO 3 (1 MINUTO): TIPOS
+// =====================================================================
+// Una búsqueda empieza cuando el precio toca una zona de 5 minutos a favor de 1H
+type Busqueda
+    int   dir             // 1 = compra, -1 = venta
+    int   tipo            // 0 = OB, 1 = vacío, 2 = manipulación
+    float top
+    float bot
+    float nivel
+    float extremo         // stop loss: mínimo más bajo (compra) o máximo más alto (venta) desde el toque
+    int   tInicio
+    int   dentro5 = 0     // OB: velas de 5m seguidas dentro de la zona
+    int   fuera5  = 0     // manipulación: velas de 5m seguidas cerradas fuera del nivel
+    bool  viva    = true
+
+// Un OB de 1 minuto creado durante una búsqueda
+type OB1
+    float top
+    float bot
+    bool  alcista
+    bool  tocado = false
+    int   dentro = 0
+
+var array<Busqueda> busquedas = array.new<Busqueda>()
+var array<OB1>      obs1      = array.new<OB1>()
 
 var array<Nivel> niveles = array.new<Nivel>()
 var array<Zona>  fvgs    = array.new<Zona>()
@@ -538,6 +615,129 @@ if dirOb != 0 and (libre or dirOb == -dir1h)
 
 // ...y luego se buscan los nuevos (así empiezan a contar desde la vela siguiente)
 
+// =====================================================================
+// PASO 3 (1 MINUTO): BÚSQUEDA Y ENTRADAS
+// =====================================================================
+// Vela de 5 minutos construida con las velas de 1 minuto (para saber cuándo se rompe la zona de 5m)
+var float v5h = na
+var float v5l = na
+var float v5c = na
+nueva5 = timeframe.change("5")
+entradaCompra = false
+entradaVenta  = false
+
+if esM1
+    // 1) Al cerrar cada vela de 5m: ¿se rompió la zona de 5m de alguna búsqueda?
+    if nueva5 and not na(v5c)
+        for b in busquedas
+            if b.tipo == 0
+                // OB: una vela de 5m cierra al otro lado, o más de 4 velas de 5m seguidas dentro
+                enZona5   = v5l <= b.top and v5h >= b.bot
+                b.dentro5 := enZona5 ? b.dentro5 + 1 : 0
+                if (b.dir == 1 ? v5c < b.bot : v5c > b.top) or b.dentro5 > maxDentro
+                    b.viva := false
+            else if b.tipo == 1
+                // Vacío: una vela de 5m cierra al otro lado
+                if b.dir == 1 ? v5c < b.bot : v5c > b.top
+                    b.viva := false
+            else
+                // Manipulación: cierra fuera del nivel y no vuelve dentro en 4 velas de 5m = rompimiento real
+                b.fuera5 := (b.dir == 1 ? v5c < b.nivel : v5c > b.nivel) ? b.fuera5 + 1 : 0
+                if b.fuera5 > maxVelas
+                    b.viva := false
+    if busquedas.size() > 0
+        for i = busquedas.size() - 1 to 0
+            if not busquedas.get(i).viva
+                busquedas.remove(i)
+
+    // 2) El stop loss sigue el mínimo (compra) o máximo (venta) desde el toque
+    for b in busquedas
+        b.extremo := b.dir == 1 ? math.min(b.extremo, low) : math.max(b.extremo, high)
+
+    // 3) ¿El precio toca ahora una zona de 5m a favor de 1H? Empieza una búsqueda nueva
+    if dirHTF != 0 and not na(z5Top)
+        if z5Top.size() > 0
+            for i = 0 to z5Top.size() - 1
+                alc = z5Alc.get(i)
+                if alc == (dirHTF == 1)
+                    t   = z5Top.get(i)
+                    bt  = z5Bot.get(i)
+                    fvg = z5Fvg.get(i)
+                    mid = (t + bt) / 2
+                    // OB: toca el cuerpo. Vacío: llega al 50 %.
+                    toca = fvg ? (alc ? low <= mid : high >= mid) : (alc ? low <= t : high >= bt)
+                    if toca
+                        existe = false
+                        for b in busquedas
+                            if b.tipo == (fvg ? 1 : 0) and b.top == t and b.bot == bt
+                                existe := true
+                        if not existe
+                            busquedas.push(Busqueda.new(dirHTF, fvg ? 1 : 0, t, bt, na, alc ? low : high, time))
+    if dirHTF != 0 and not na(n5Niv)
+        if n5Niv.size() > 0
+            for i = 0 to n5Niv.size() - 1
+                nv5   = n5Niv.get(i)
+                alto5 = n5Alto.get(i)
+                // Compra: pasa un poquito un bajo. Venta: pasa un poquito un alto.
+                if dirHTF == 1 ? (not alto5 and low < nv5) : (alto5 and high > nv5)
+                    existe = false
+                    for b in busquedas
+                        if b.tipo == 2 and b.nivel == nv5
+                            existe := true
+                    if not existe
+                        busquedas.push(Busqueda.new(dirHTF, 2, na, na, nv5, dirHTF == 1 ? low : high, time))
+    if busquedas.size() == 0
+        obs1.clear()
+
+    // 4) OB de 1 minuto: el precio vuelve a tocarlo y la primera vela que cierra más allá del cuerpo es la entrada
+    if obs1.size() > 0
+        for i = obs1.size() - 1 to 0
+            o = obs1.get(i)
+            toca     = o.alcista ? low <= o.top : high >= o.bot
+            invalida = o.alcista ? close < o.bot : close > o.top
+            enZona   = low <= o.top and high >= o.bot
+            o.dentro := enZona ? o.dentro + 1 : 0
+            entra    = (o.tocado or toca) and (o.alcista ? close > o.top : close < o.bot)
+            borrar   = false
+            if invalida or o.dentro > maxDentro
+                borrar := true
+            else if entra and dirHTF == (o.alcista ? 1 : -1)
+                // Stop loss: el extremo desde que se tocó la zona de 5m
+                float sl = na
+                for b in busquedas
+                    if b.dir == (o.alcista ? 1 : -1)
+                        sl := na(sl) ? b.extremo : (o.alcista ? math.min(sl, b.extremo) : math.max(sl, b.extremo))
+                riesgo = o.alcista ? close - sl : sl - close
+                if not na(sl) and riesgo > 0
+                    tp = o.alcista ? close + 3 * riesgo : close - 3 * riesgo
+                    box.new(bar_index, tp, bar_index + 30, close, border_color = color.new(color.green, 30), bgcolor = color.new(color.green, 75))
+                    box.new(bar_index, close, bar_index + 30, sl, border_color = color.new(color.red, 30), bgcolor = color.new(color.red, 75))
+                    label.new(bar_index, o.alcista ? low : high, o.alcista ? "COMPRA" : "VENTA", style = o.alcista ? label.style_label_up : label.style_label_down, color = o.alcista ? color.green : color.red, textcolor = color.white, size = size.small)
+                    entradaCompra := o.alcista
+                    entradaVenta  := not o.alcista
+                borrar := true
+            else
+                o.tocado := o.tocado or toca
+            if borrar
+                obs1.remove(i)
+
+// Actualiza la vela de 5m construida con velas de 1m
+if nueva5
+    v5h := high
+    v5l := low
+else
+    v5h := math.max(v5h, high)
+    v5l := math.min(v5l, low)
+v5c := close
+
+// ¿Hay una búsqueda viva en esta dirección? (solo entonces sirven los OB de 1m nuevos)
+hayBusqueda(int d) =>
+    hay = false
+    for b in busquedas
+        if b.dir == d
+            hay := true
+    hay
+
 // Vacíos de 3 velas
 if showFvg and activo
     if low > high[2]
@@ -556,12 +756,16 @@ var float verdeC   = na
 
 // OB alcista: una vela cierra por encima del CUERPO de la última vela roja (su apertura)
 if not na(rojaIdx) and close > rojaO
+    if esM1 and hayBusqueda(1)
+        obs1.push(OB1.new(rojaO, rojaC, true))
     if showOb and activo
         obs.push(nuevaZona(rojaO, rojaC, true, false, rojaIdx))
     rojaIdx := na
 
 // OB bajista: una vela cierra por debajo del CUERPO de la última vela verde (su apertura)
 if not na(verdeIdx) and close < verdeO
+    if esM1 and hayBusqueda(-1)
+        obs1.push(OB1.new(verdeC, verdeO, false))
     if showOb and activo
         obs.push(nuevaZona(verdeC, verdeO, false, false, verdeIdx))
     verdeIdx := na
@@ -645,3 +849,7 @@ if barstate.islast and esH1
     table.cell(panel, 0, 3, dir1h != 0 ? "Objetivo: " + objTxt : "", bgcolor = color.new(color.black, 20), text_color = color.yellow, text_size = size.small)
     inval = dir1h != 0 and not na(objOrigen) ? "Se cancela si cierra " + (dir1h == 1 ? "por debajo de " : "por encima de ") + str.tostring(objOrigen, format.mintick) : ""
     table.cell(panel, 0, 4, inval, bgcolor = color.new(color.black, 20), text_color = color.orange, text_size = size.small)
+
+// Alertas opcionales: solo avisan si las activas tú en TradingView (Crear alerta → este indicador)
+alertcondition(entradaCompra, "Entrada COMPRA (1m)", "XAUUSD: entrada de COMPRA en 1 minuto")
+alertcondition(entradaVenta, "Entrada VENTA (1m)", "XAUUSD: entrada de VENTA en 1 minuto")
