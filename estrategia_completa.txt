@@ -1,0 +1,262 @@
+ESTRATEGIA XAUUSD (ORO) — 1H + 5M + 1M
+=====================================
+
+RESUMEN
+-------
+- Activo: XAUUSD (oro).
+- Tres temporalidades, cada una con su función:
+  - PASO 1 (1H): define la DIRECCIÓN (compra o venta) y su objetivo.
+  - PASO 2 (5M): marca solo las zonas (OB, vacíos, manipulaciones) A FAVOR de la dirección de 1H.
+  - PASO 3 (1M): cuando el precio toca una zona de 5M, se busca un OB nuevo en 1M y se entra cuando una vela cierra más allá de su cuerpo.
+- Las definiciones de altos/bajos, manipulaciones, vacíos y order blocks son EXACTAMENTE IGUALES en las tres temporalidades.
+
+
+=====================================
+PARTE A — DEFINICIONES (iguales en 1H, 5M y 1M)
+=====================================
+
+A1. ALTOS Y BAJOS (ESTRUCTURA)
+------------------------------
+- Los altos y bajos van SIEMPRE ALTERNADOS: bajo → alto → bajo → alto.
+  - Para marcar un alto nuevo, antes tiene que haber un bajo.
+  - Para marcar un bajo nuevo, antes tiene que haber un alto.
+  - Vale igual en tendencia alcista y bajista.
+- Un alto es un pico: una vela con 3 velas a cada lado con máximos más bajos.
+  Un bajo es lo mismo al revés: 3 velas a cada lado con mínimos más altos.
+  Por eso un alto o un bajo se confirma 3 velas después de formarse.
+- Si salen dos altos seguidos sin un bajo en medio, solo cuenta el más alto.
+  Si salen dos bajos seguidos sin un alto en medio, solo cuenta el más bajo.
+- Cada alto o bajo se marca con una línea mientras NO haya sido manipulado ni roto.
+- Un alto o bajo que ya fue manipulado o roto deja de marcarse.
+
+A2. MANIPULACIÓN (FALSO ROMPIMIENTO)
+------------------------------------
+- Empieza cuando el precio PASA un alto (o un bajo) que está activo.
+- Hay dos tipos, y los dos cuentan:
+  - TIPO 1, CON MECHA: la vela pasa el nivel con la mecha y CIERRA OTRA VEZ DENTRO
+    (por debajo del alto, o por encima del bajo). Es manipulación en esa misma vela.
+  - TIPO 2, CON CIERRE FUERA: la vela CIERRA FUERA del nivel, pero en las
+    4 VELAS SIGUIENTES (como máximo) una vela vuelve a cerrar dentro.
+- Si en esas 4 velas no vuelve a cerrar dentro, es un ROMPIMIENTO REAL: no se marca
+  nada y el nivel se quita.
+- Significado:
+  - Manipulación de un ALTO = señal de VENTA.
+  - Manipulación de un BAJO = señal de COMPRA.
+- El "extremo" de la manipulación es el punto más alto (en un alto) o más bajo
+  (en un bajo) que alcanzó el precio durante la manipulación. Se usa como nivel de
+  cancelación de la dirección (ver PASO 1).
+
+A3. VACÍO (FVG / FAIR VALUE GAP)
+--------------------------------
+- Formación (3 velas seguidas):
+  - Vacío ALCISTA: el mínimo de la vela 3 está por encima del máximo de la vela 1.
+    Zona = desde el máximo de la vela 1 hasta el mínimo de la vela 3.
+  - Vacío BAJISTA: el máximo de la vela 3 está por debajo del mínimo de la vela 1.
+    Zona = desde el máximo de la vela 3 hasta el mínimo de la vela 1.
+- Se marcan TODOS los vacíos, sin tamaño mínimo, con una línea en su 50 %.
+- Empiezan a revisarse desde la vela siguiente a su formación.
+- TOQUE VÁLIDO: el precio tiene que llegar al 50 % del vacío o más (con cuerpo o con
+  mecha). Si rebota antes del 50 %, no cuenta.
+  - Si la mecha atraviesa todo el vacío, el toque cuenta y el vacío NO se invalida
+    (solo lo invalida un cierre).
+- REACCIÓN (válida una sola vez):
+  - La vela que toca el 50 % CIERRA A FAVOR (verde en vacío alcista, roja en bajista), o
+  - la vela que toca no cierra a favor, pero la SIGUIENTE vela sí cierra a favor.
+  - Al reaccionar se marca "✓ FVG" y el vacío se borra.
+- INVALIDACIÓN: una vela CIERRA al otro lado del vacío (por debajo en uno alcista,
+  por encima en uno bajista). El vacío se borra.
+- Los vacíos NO tienen regla de velas dentro (eso es solo para los OB).
+- Significado: reacción en vacío alcista = COMPRA; en vacío bajista = VENTA.
+
+A4. ORDER BLOCK (OB)
+--------------------
+- Qué vela es el OB:
+  - OB ALCISTA: la ÚLTIMA VELA ROJA antes del movimiento de subida.
+  - OB BAJISTA: la ÚLTIMA VELA VERDE antes del movimiento de bajada.
+  - Las velas sin cuerpo (doji) no cuentan.
+- Cuándo se CREA:
+  - OB alcista: en cuanto una vela posterior CIERRA POR ENCIMA DEL CUERPO de esa vela
+    roja (por encima de su apertura).
+  - OB bajista: en cuanto una vela posterior CIERRA POR DEBAJO DEL CUERPO de esa vela
+    verde (por debajo de su apertura).
+  - Después de crearse un OB, para el siguiente hace falta una vela contraria nueva.
+- ZONA del OB = SOLO EL CUERPO de la vela (de la apertura al cierre), sin mechas.
+- La vela que CREA el OB no cuenta como reacción. Se revisa desde la vela siguiente.
+- TOQUE VÁLIDO: basta con que el precio toque el cuerpo, aunque sea un 1 % y aunque
+  sea con la mecha.
+- REACCIÓN (válida una sola vez):
+  - La vela que toca el cuerpo CIERRA A FAVOR (verde en OB alcista, roja en bajista), o
+  - la vela que toca no cierra a favor, pero la SIGUIENTE vela sí cierra a favor.
+  - Al reaccionar se marca "✓ OB" y el OB se borra.
+- INVALIDACIÓN (lo que pase primero):
+  - Una vela CIERRA al otro lado del cuerpo (por debajo en uno alcista, por encima en
+    uno bajista), o
+  - hay MÁS DE 4 VELAS SEGUIDAS DENTRO del cuerpo (tocándolo con cuerpo o mecha) sin
+    reacción: no lo va a respetar, lo va a romper. Si una vela sale de la zona, la
+    cuenta vuelve a cero.
+- Significado: reacción en OB alcista = COMPRA; en OB bajista = VENTA.
+
+
+=====================================
+PARTE B — PASO 1: DIRECCIÓN EN 1H
+=====================================
+
+B1. SEÑALES DE DIRECCIÓN
+------------------------
+- COMPRA: manipulación de un BAJO, ✓ en OB ALCISTA o ✓ en vacío ALCISTA.
+- VENTA:  manipulación de un ALTO, ✓ en OB BAJISTA o ✓ en vacío BAJISTA.
+
+B2. CÓMO CAMBIA LA DIRECCIÓN
+----------------------------
+- Al principio no hay dirección. La primera señal la marca.
+- Mientras hay una dirección activa:
+  - Las señales A FAVOR se ignoran (se mantienen la dirección y el objetivo que ya
+    había).
+  - Cualquier señal CONTRARIA (manipulación, OB o vacío) ANULA la dirección actual y
+    pone la nueva, con su nuevo objetivo y su nuevo nivel de cancelación. Idea: si
+    reacciona a una zona contraria, empieza la distribución hacia el otro lado.
+
+B3. OBJETIVO (HASTA DÓNDE VA LA DISTRIBUCIÓN)
+---------------------------------------------
+- La distribución termina en el siguiente alto/bajo, el siguiente OB contrario o el
+  siguiente vacío contrario. Se toma el MÁS CERCANO al cierre de la vela de la señal:
+  - En COMPRA: el siguiente ALTO por encima, el siguiente OB BAJISTA por encima o el
+    siguiente vacío BAJISTA por encima.
+  - En VENTA: el siguiente BAJO por debajo, el siguiente OB ALCISTA por debajo o el
+    siguiente vacío ALCISTA por debajo.
+- Si no hay ninguno: "sin objetivo a la vista". La dirección sigue hasta una señal
+  contraria o una cancelación por el origen, y acepta cualquier señal nueva.
+
+B4. CUÁNDO TERMINA LA DIRECCIÓN (pasa a "sin dirección")
+--------------------------------------------------------
+1. OBJETIVO ALCANZADO: el precio LLEGA al objetivo.
+   - Alto/bajo: toca su precio.
+   - OB o vacío: toca su borde más cercano.
+   - Si llega en la MISMA vela de la señal, la dirección termina en esa vela.
+2. CANCELADA POR EL OBJETIVO: una vela de 1H CIERRA MÁS ALLÁ del objetivo
+   (más allá del precio del alto/bajo, o más allá de TODA la zona del OB o vacío).
+3. CANCELADA POR EL ORIGEN (el precio se va en contra): una vela de 1H CIERRA más allá
+   del punto donde nació la señal:
+   - Señal por manipulación: más allá del extremo de la manipulación (en venta, cierre
+     por encima de la punta de la mecha; en compra, cierre por debajo).
+   - Señal por OB o vacío: más allá de la zona (en venta, cierre por encima de la zona;
+     en compra, cierre por debajo).
+- Después de terminar, se queda en "sin dirección" hasta la siguiente señal de 1H.
+
+B5. QUÉ SE VE EN 1H
+-------------------
+- Todo el paso 1: altos y bajos, M (manipulaciones), vacíos con su 50 %, OB, ✓.
+- Panel arriba a la derecha: dirección (▲ COMPRA / ▼ VENTA / sin dirección), señal que
+  la marcó y hora, objetivo y nivel de cancelación por el origen.
+- El paso 1 solo se dibuja en 1H.
+
+
+=====================================
+PARTE C — PASO 2: ZONAS EN 5M
+=====================================
+- Mismas definiciones que en 1H (parte A).
+- Solo se marca lo que va A FAVOR de la dirección de 1H:
+  - 1H en COMPRA: bajos (líneas), manipulaciones de bajos, OB alcistas, vacíos alcistas.
+  - 1H en VENTA: altos (líneas), manipulaciones de altos, OB bajistas, vacíos bajistas.
+- También se marcan las zonas de 5M que ya existían antes de la señal de 1H y siguen
+  vivas.
+- 1H sin dirección: en 5M no se marca nada.
+- En 5M no hay panel. El paso 2 solo se dibuja en 5M.
+- Dirección de 1H usada en 5M y 1M:
+  - En vivo: la de la vela de 1H que se está formando (aparece en cuanto sale la señal;
+    puede cambiar o desaparecer antes de que cierre la vela de 1H).
+  - En el historial: la de la última vela de 1H cerrada.
+
+
+=====================================
+PARTE D — PASO 3: ENTRADA EN 1M
+=====================================
+
+D1. CUÁNDO EMPIEZA LA BÚSQUEDA
+------------------------------
+- Siempre a favor de la dirección de 1H.
+- La búsqueda empieza en el momento en que el precio, en 1M:
+  - TOCA EL CUERPO de un OB de 5M a favor, o
+  - LLEGA AL 50 % de un vacío de 5M a favor, o
+  - PASA UN POQUITO un bajo de 5M (en compra) o un alto de 5M (en venta).
+- No hace falta esperar al ✓ ni a la M en 5M: basta con el toque.
+- Solo hay UNA búsqueda a la vez. Si mientras se busca el precio toca otra zona de 5M,
+  esa zona se ignora.
+- Cada zona de 5M se usa una sola vez.
+- Mientras hay una operación abierta, no se busca nada.
+
+D2. QUÉ SE BUSCA EN 1M
+----------------------
+- Un OB de 1M A FAVOR, creado DESPUÉS del toque de la zona de 5M (los OB de 1M que ya
+  existían antes no sirven).
+- Se crea con la misma regla de siempre: una vela cierra más allá del cuerpo de la
+  última vela contraria.
+- Si ese OB de 1M se invalida (cierre al otro lado o más de 4 velas dentro), se espera
+  a que se cree otro OB nuevo, mientras la zona de 5M siga viva.
+
+D3. ENTRADA
+-----------
+- El precio vuelve y TOCA el cuerpo del OB de 1M (cualquier toque).
+- La PRIMERA vela de 1M que CIERRA:
+  - POR ENCIMA del cuerpo del OB → COMPRA.
+  - POR DEBAJO del cuerpo del OB → VENTA.
+- La entrada es al cierre de esa vela. La misma vela puede tocar el OB y cerrar más
+  allá.
+- Solo se entra si la dirección de 1H en ese momento coincide.
+
+D4. STOP LOSS Y TAKE PROFIT
+---------------------------
+- STOP LOSS: en el low (compra) o high (venta) que deja el OB de 1M al crearse:
+  - Compra: el mínimo más bajo desde la vela del OB hasta la vela de entrada.
+  - Venta: el máximo más alto desde la vela del OB hasta la vela de entrada.
+  - Justo en ese nivel, sin margen extra.
+- TAKE PROFIT: relación 1:3 (3 veces la distancia entre la entrada y el stop).
+
+D5. DESPUÉS DE LA ENTRADA
+-------------------------
+- Una sola entrada por zona de 5M. Después de entrar, la búsqueda termina.
+- La operación termina cuando el precio toca el TP o el SL. Si toca los dos en la misma
+  vela, cuenta como SL.
+- Al terminar no se busca nada en esa zona: hay que esperar a que el precio toque OTRA
+  zona de 5M a favor de 1H.
+
+D6. CUÁNDO SE CANCELA LA BÚSQUEDA (sin haber entrado)
+-----------------------------------------------------
+Solo cuando la zona de 5M se ROMPE (se invalida):
+- OB de 5M: una vela de 5M cierra al otro lado del cuerpo, o hay más de 4 velas de 5M
+  seguidas dentro.
+- Vacío de 5M: una vela de 5M cierra al otro lado del vacío.
+- Manipulación de 5M: el precio cierra fuera del nivel y no vuelve a cerrar dentro en
+  4 velas de 5M (rompimiento real).
+- Cuando se rompe, no se marcan más entradas hasta que el precio llegue a otra zona.
+
+D7. QUÉ SE VE EN 1M
+-------------------
+- Mientras se busca: el OB de 1M ("OB 1m"). Se quita al entrar o al invalidarse.
+- Operación abierta: línea de ENTRADA (azul), TP (verde) y SL (roja) con sus precios.
+  Se quitan al tocar el TP o el SL.
+- Historial: marca ▲ (compra) o ▼ (venta) en la vela de entrada; al cerrar pasa a
+  "✓" verde (TP) o "✗" rojo (SL).
+- Panel arriba a la derecha: dirección de 1H y estado ("Esperando que el precio toque
+  una zona de 5m", "Buscando OB de 1m en ...", "Operación abierta", "Sin dirección en
+  1H").
+- Alertas opcionales de entrada COMPRA/VENTA (solo si se activan en TradingView).
+- El paso 3 solo se dibuja en 1M.
+
+
+=====================================
+PARTE E — PARÁMETROS POR DEFECTO DEL INDICADOR
+=====================================
+- Velas a cada lado para confirmar un alto/bajo: 3.
+- Velas máximas para volver dentro en una manipulación: 4.
+- OB: máximo de velas seguidas dentro antes de invalidarse: 4 (con 5 se invalida).
+- Máximo de vacíos activos: 15. Máximo de OB activos: 15. Máximo de altos/bajos: 30.
+- Relación del take profit: 1:3.
+
+
+=====================================
+AVISO
+=====================================
+Material educativo. El indicador marca zonas y entradas según estas reglas, pero no
+garantiza resultados. Ningún resultado pasado o simulado garantiza resultados futuros.
+Probar primero en demo.
