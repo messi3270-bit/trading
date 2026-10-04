@@ -181,6 +181,16 @@ D1. CUÁNDO EMPIEZA LA BÚSQUEDA
 - Cada zona de 5M se usa una sola vez.
 - Mientras hay una operación abierta, no se busca nada.
 
+D1b. BLOQUEO POR OB DE 1H CONTRARIO
+-----------------------------------
+- No se busca ninguna COMPRA mientras el precio está en un OB BAJISTA de 1H, ni ninguna
+  VENTA mientras está en un OB ALCISTA de 1H (solo OB, no vacíos).
+- El bloqueo empieza cuando el precio TOCA ese OB de 1H y dura hasta que se decide:
+  - lo RESPETA (✓ en 1H → la dirección cambia), o
+  - lo ROMPE (una vela de 1H cierra al otro lado → la dirección sigue).
+- Mientras dura el bloqueo se cancelan las búsquedas y no se dan entradas nuevas.
+  Las operaciones ya abiertas no se tocan.
+
 D2. QUÉ SE BUSCA EN 1M
 ----------------------
 - Un OB de 1M A FAVOR, creado DESPUÉS del toque de la zona de 5M (los OB de 1M que ya

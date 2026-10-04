@@ -353,6 +353,9 @@ dirHTF = nz(dir60)
 // Zonas y niveles vivos de 5 minutos (de la última vela cerrada de 5m), para el paso 3
 [dir5, z5Top, z5Bot, z5Alc, z5Fvg, n5Niv, n5Alto, dir5v] = request.security(syminfo.tickerid, "5", motor(), lookahead = barmerge.lookahead_on)
 
+// Zonas vivas de 1H (de la última vela cerrada de 1H), para el bloqueo por OB de 1H en el paso 3
+[d60z, z60Top, z60Bot, z60Alc, z60Fvg, n60z, e60z, d60z2] = request.security(syminfo.tickerid, "60", motor(), lookahead = barmerge.lookahead_on)
+
 // ¿Se debe ver una zona / un nivel?  En 1H todo; en 5m solo lo que va a favor de 1H.
 zonaVisible(bool alcista) =>
     esH1 or (dirHTF != 0 and dirHTF == (alcista ? 1 : -1))
@@ -726,6 +729,10 @@ var float v5c = na
 nueva5 = timeframe.change("5")
 entradaCompra = false
 entradaVenta  = false
+// Bloqueo: el precio tocó un OB de 1H CONTRARIO a la dirección (OB bajista en compra, OB alcista en venta)
+// y ese OB todavía no se ha decidido (ni ✓ ni ruptura en 1H). Mientras tanto no se busca ninguna entrada.
+var array<string> tocadas1h = array.new<string>()
+bloqueo1h = false
 
 if esM1
     // 0) Si cambia la dirección de 1H: las búsquedas de entrada de la dirección anterior se reinician.
@@ -761,10 +768,29 @@ if esM1
     for b in busquedas
         b.extremo := b.dir == 1 ? math.min(b.extremo, low) : math.max(b.extremo, high)
 
+    // 2b) Bloqueo por OB de 1H contrario: hay que esperar a ver si lo respeta o lo rompe
+    if dirHTF != 0 and not na(z60Top)
+        if z60Top.size() > 0
+            for i = 0 to z60Top.size() - 1
+                // Solo OB (no vacíos) y solo los contrarios a la dirección de 1H
+                if not z60Fvg.get(i) and z60Alc.get(i) == (dirHTF == -1)
+                    t1 = z60Top.get(i)
+                    b1 = z60Bot.get(i)
+                    k1 = claveZona(9, t1, b1)
+                    if low <= t1 and high >= b1 and not tocadas1h.includes(k1)
+                        tocadas1h.push(k1)
+                    if tocadas1h.includes(k1)
+                        bloqueo1h := true
+    while tocadas1h.size() > 100
+        tocadas1h.shift()
+    if bloqueo1h
+        busquedas.clear()
+        limpiarObs1()
+
     // 3) Si no hay ninguna búsqueda activa: ¿el precio toca una zona de 5m a favor de 1H que no se haya usado?
     //    Solo hay UNA búsqueda a la vez. Cada zona de 5m se usa una sola vez.
     //    Mientras haya una operación abierta (sin tocar TP ni SL) no se busca nada.
-    if abiertas.size() == 0 and busquedas.size() == 0 and dirHTF != 0 and not na(z5Top)
+    if not bloqueo1h and abiertas.size() == 0 and busquedas.size() == 0 and dirHTF != 0 and not na(z5Top)
         if z5Top.size() > 0
             for i = 0 to z5Top.size() - 1
                 alc = z5Alc.get(i)
@@ -779,7 +805,7 @@ if esM1
                     if toca and not usadas.includes(clave)
                         usadas.push(clave)
                         busquedas.push(Busqueda.new(dirHTF, fvg ? 1 : 0, t, bt, na, alc ? low : high, time))
-    if abiertas.size() == 0 and busquedas.size() == 0 and dirHTF != 0 and not na(n5Niv)
+    if not bloqueo1h and abiertas.size() == 0 and busquedas.size() == 0 and dirHTF != 0 and not na(n5Niv)
         if n5Niv.size() > 0
             for i = 0 to n5Niv.size() - 1
                 nv5   = n5Niv.get(i)
@@ -998,6 +1024,8 @@ if barstate.islast and esM1
     string est = ""
     if abiertas.size() > 0
         est := "Operación abierta (" + (abiertas.get(0).compra ? "COMPRA" : "VENTA") + ")"
+    else if bloqueo1h
+        est := "Precio en OB de " + (dirHTF == 1 ? "venta" : "compra") + " de 1H: esperando si lo respeta o lo rompe"
     else if busquedas.size() > 0
         b0 = busquedas.get(0)
         est := "Buscando OB de 1m en " + (b0.tipo == 0 ? "OB de 5m" : b0.tipo == 1 ? "vacío de 5m" : "manipulación de 5m")
