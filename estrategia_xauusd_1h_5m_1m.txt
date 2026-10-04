@@ -733,6 +733,7 @@ entradaVenta  = false
 // y ese OB todavía no se ha decidido (ni ✓ ni ruptura en 1H). Mientras tanto no se busca ninguna entrada.
 var array<string> tocadas1h = array.new<string>()
 bloqueo1h = false
+string bloqueoTxt = ""
 
 if esM1
     // 0) Si cambia la dirección de 1H: las búsquedas de entrada de la dirección anterior se reinician.
@@ -780,7 +781,8 @@ if esM1
                     if low <= t1 and high >= b1 and not tocadas1h.includes(k1)
                         tocadas1h.push(k1)
                     if tocadas1h.includes(k1)
-                        bloqueo1h := true
+                        bloqueo1h  := true
+                        bloqueoTxt := str.tostring(b1, format.mintick) + " – " + str.tostring(t1, format.mintick)
     while tocadas1h.size() > 100
         tocadas1h.shift()
     if bloqueo1h
@@ -1025,7 +1027,7 @@ if barstate.islast and esM1
     if abiertas.size() > 0
         est := "Operación abierta (" + (abiertas.get(0).compra ? "COMPRA" : "VENTA") + ")"
     else if bloqueo1h
-        est := "Precio en OB de " + (dirHTF == 1 ? "venta" : "compra") + " de 1H: esperando si lo respeta o lo rompe"
+        est := "Precio en OB de " + (dirHTF == 1 ? "venta" : "compra") + " de 1H (" + bloqueoTxt + "): esperando si lo respeta o lo rompe"
     else if busquedas.size() > 0
         b0 = busquedas.get(0)
         est := "Buscando OB de 1m en " + (b0.tipo == 0 ? "OB de 5m" : b0.tipo == 1 ? "vacío de 5m" : "manipulación de 5m")
