@@ -103,51 +103,47 @@ PARTE B — PASO 1: DIRECCIÓN EN 1H
 
 B1. SEÑALES DE DIRECCIÓN
 ------------------------
-- COMPRA: manipulación de un BAJO, ✓ en OB ALCISTA o ✓ en vacío ALCISTA.
-- VENTA:  manipulación de un ALTO, ✓ en OB BAJISTA o ✓ en vacío BAJISTA.
+- COMPRA: manipulación de un BAJO, ✓ en OB ALCISTA, ✓ en vacío ALCISTA, o RUPTURA hacia
+  arriba (una vela cierra por ENCIMA de un ALTO, de un OB BAJISTA o de un vacío BAJISTA).
+- VENTA: manipulación de un ALTO, ✓ en OB BAJISTA, ✓ en vacío BAJISTA, o RUPTURA hacia
+  abajo (una vela cierra por DEBAJO de un BAJO, de un OB ALCISTA o de un vacío ALCISTA).
+- La ruptura de un alto/bajo cuenta en la PRIMERA vela que cierra fuera. Si en las 4 velas
+  siguientes vuelve a cerrar dentro, se convierte en manipulación y cambia al revés.
+- Idea: si el precio rompe una zona, va a seguir en esa dirección a buscar la siguiente.
 
 B2. CÓMO CAMBIA LA DIRECCIÓN
 ----------------------------
 - Al principio no hay dirección. La primera señal la marca.
-- Mientras hay una dirección activa:
-  - Las señales A FAVOR se ignoran (se mantienen la dirección y el objetivo que ya
-    había).
-  - Cualquier señal CONTRARIA (manipulación, OB o vacío) ANULA la dirección actual y
-    pone la nueva, con su nuevo objetivo y su nuevo nivel de cancelación. Idea: si
-    reacciona a una zona contraria, empieza la distribución hacia el otro lado.
+- Señal CONTRARIA (manipulación, ✓ o ruptura) → cambia la dirección, con nuevo objetivo.
+- RUPTURA A FAVOR → continuación: la dirección sigue y se busca el siguiente objetivo.
+- Reacciones (✓) y manipulaciones A FAVOR → se ignoran (se mantiene el objetivo).
 
 B3. OBJETIVO (HASTA DÓNDE VA LA DISTRIBUCIÓN)
 ---------------------------------------------
-- La distribución termina en el siguiente alto/bajo, el siguiente OB contrario o el
-  siguiente vacío contrario. Se toma el MÁS CERCANO al cierre de la vela de la señal:
-  - En COMPRA: el siguiente ALTO por encima, el siguiente OB BAJISTA por encima o el
-    siguiente vacío BAJISTA por encima.
-  - En VENTA: el siguiente BAJO por debajo, el siguiente OB ALCISTA por debajo o el
-    siguiente vacío ALCISTA por debajo.
-- Si no hay ninguno: "sin objetivo a la vista". La dirección sigue hasta una señal
-  contraria o una cancelación por el origen, y acepta cualquier señal nueva.
+- El MÁS CERCANO al cierre de la vela de la señal:
+  - En COMPRA: el siguiente ALTO, OB BAJISTA o vacío BAJISTA por encima.
+  - En VENTA: el siguiente BAJO, OB ALCISTA o vacío ALCISTA por debajo.
+- Si no hay ninguno: "sin objetivo a la vista" (la dirección sigue y acepta cualquier señal).
 
-B4. CUÁNDO TERMINA LA DIRECCIÓN (pasa a "sin dirección")
---------------------------------------------------------
-1. OBJETIVO ALCANZADO: el precio LLEGA al objetivo.
-   - Alto/bajo: toca su precio.
-   - OB o vacío: toca su borde más cercano.
-   - Si llega en la MISMA vela de la señal, la dirección termina en esa vela.
-2. CANCELADA POR EL OBJETIVO: una vela de 1H CIERRA MÁS ALLÁ del objetivo
-   (más allá del precio del alto/bajo, o más allá de TODA la zona del OB o vacío).
-3. CANCELADA POR EL ORIGEN (el precio se va en contra): una vela de 1H CIERRA más allá
-   del punto donde nació la señal:
-   - Señal por manipulación: más allá del extremo de la manipulación (en venta, cierre
-     por encima de la punta de la mecha; en compra, cierre por debajo).
-   - Señal por OB o vacío: más allá de la zona (en venta, cierre por encima de la zona;
-     en compra, cierre por debajo).
-- Después de terminar, se queda en "sin dirección" hasta la siguiente señal de 1H.
+B4. QUÉ PASA EN EL OBJETIVO Y EN EL ORIGEN
+------------------------------------------
+- El precio TOCA el objetivo pero NO lo rompe: la dirección sigue. Si reacciona en esa zona
+  (✓ o manipulación contraria), esa reacción cambia la dirección.
+- Una vela de 1H CIERRA MÁS ALLÁ del objetivo (a favor): CONTINUACIÓN. La dirección sigue y
+  se busca el siguiente objetivo, y así mientras siga rompiendo.
+- Una vela de 1H CIERRA MÁS ALLÁ del ORIGEN de la señal (en contra): CAMBIA DE DIRECCIÓN.
+  - Origen de una manipulación: la punta de la mecha. De una reacción: el borde de la zona.
+  - Origen de una ruptura o continuación: el extremo de la vela que rompió (el mínimo en
+    compra, el máximo en venta).
+- Ya no existe "objetivo alcanzado → sin dirección": una vez hay dirección, siempre hay una.
 
 B5. QUÉ SE VE EN 1H
 -------------------
 - Todo el paso 1: altos y bajos, M (manipulaciones), vacíos con su 50 %, OB, ✓.
 - Panel arriba a la derecha: dirección (▲ COMPRA / ▼ VENTA / sin dirección), señal que
-  la marcó y hora, objetivo y nivel de cancelación por el origen.
+  la marcó y hora, objetivo y nivel del origen (si cierra más allá, cambia de dirección).
+- Fondo de color en 1H y 5M con la dirección de 1H en cada momento: verde = compra,
+  rojo = venta (se puede quitar en los ajustes).
 - El paso 1 solo se dibuja en 1H.
 
 

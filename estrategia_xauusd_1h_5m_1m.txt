@@ -21,6 +21,7 @@ colObUp  = input.color(color.new(#FF9800, 80), "OB alcista", group = grpO)
 colObDn  = input.color(color.new(#E65100, 80), "OB bajista", group = grpO)
 
 grpG     = "General"
+showBg   = input.bool(true, "Fondo de color con la dirección de 1H (1H y 5m)", group = grpG)
 maxDentro = input.int(4, "OB: máximo de velas seguidas dentro (si hay más, se invalida)", minval = 1, group = grpO)
 maxZonas = input.int(15, "Máximo de vacíos / OB activos (de cada tipo)", minval = 1, group = grpG)
 maxNivel = input.int(30, "Máximo de altos/bajos activos", minval = 2, group = grpG)
@@ -73,8 +74,9 @@ type ZonaP
     int   dentro = 0
 
 procZonasP(array<ZonaP> arr) =>
-    int   dir   = 0
-    float borde = na
+    int   dir     = 0
+    float borde   = na
+    int   ruptura = 0
     if arr.size() > 0
         for i = arr.size() - 1 to 0
             z    = arr.get(i)
@@ -88,6 +90,8 @@ procZonasP(array<ZonaP> arr) =>
             reacciona = aFavor and (toca or z.tocado)
             borrar = false
             if invalida or atascado
+                if invalida
+                    ruptura := z.alcista ? -1 : 1
                 borrar := true
             else if reacciona
                 dir    := z.alcista ? 1 : -1
@@ -97,7 +101,7 @@ procZonasP(array<ZonaP> arr) =>
                 z.tocado := toca
             if borrar
                 arr.remove(i)
-    [dir, borde]
+    [dir, borde, ruptura]
 
 objetivoP(int d, array<NivelP> nv, array<ZonaP> ob, array<ZonaP> fv) =>
     float mejorDist = na
@@ -147,18 +151,14 @@ motor() =>
     var float  vO      = na
     var float  vC      = na
     nueva = false
-    // Cancelaciones
+    // Ruptura del origen: cambia de dirección. Ruptura del objetivo a favor: continuación.
     if dir != 0 and not na(oOrigen) and (dir == 1 ? close < oOrigen : close > oOrigen)
-        dir     := 0
-        oOrigen := na
-        oToque  := na
-        oUmbral := na
-    if dir != 0 and not na(oUmbral)
-        if (dir == 1 ? close > oUmbral : close < oUmbral) or (dir == 1 ? high >= oToque : low <= oToque)
-            dir     := 0
-            oOrigen := na
-            oToque  := na
-            oUmbral := na
+        dir     := -dir
+        oOrigen := dir == 1 ? low : high
+        nueva   := true
+    else if dir != 0 and not na(oUmbral) and (dir == 1 ? close > oUmbral : close < oUmbral)
+        oOrigen := dir == 1 ? low : high
+        nueva   := true
     libre = dir == 0 or na(oUmbral)
     // Manipulaciones
     if nv.size() > 0
@@ -184,6 +184,16 @@ motor() =>
                 roto  := not dentro and n.cuenta >= maxVelas
             if cf
                 n.estado := 1
+                // Ruptura del nivel: dirección hacia donde rompe
+                dR = n.esAlto ? 1 : -1
+                if libre or dR == -dir
+                    dir     := dR
+                    oOrigen := dR == 1 ? low : high
+                    nueva   := true
+                    libre   := false
+                else if dR == dir
+                    oOrigen := dR == 1 ? low : high
+                    nueva   := true
             if manip or roto
                 dM = n.esAlto ? -1 : 1
                 if manip and (libre or dM == -dir)
@@ -216,18 +226,36 @@ motor() =>
         v = nv.shift()
         v.vivo := false
     // Reacciones en vacíos y OB
-    [dF, bF] = procZonasP(fv)
+    [dF, bF, rupF] = procZonasP(fv)
     if dF != 0 and (libre or dF == -dir)
         dir     := dF
         oOrigen := bF
         nueva   := true
         libre   := false
-    [dO, bO] = procZonasP(ob)
+    if rupF != 0
+        if libre or rupF == -dir
+            dir     := rupF
+            oOrigen := rupF == 1 ? low : high
+            nueva   := true
+            libre   := false
+        else if rupF == dir
+            oOrigen := rupF == 1 ? low : high
+            nueva   := true
+    [dO, bO, rupO] = procZonasP(ob)
     if dO != 0 and (libre or dO == -dir)
         dir     := dO
         oOrigen := bO
         nueva   := true
         libre   := false
+    if rupO != 0
+        if libre or rupO == -dir
+            dir     := rupO
+            oOrigen := rupO == 1 ? low : high
+            nueva   := true
+            libre   := false
+        else if rupO == dir
+            oOrigen := rupO == 1 ? low : high
+            nueva   := true
     // Vacíos nuevos
     if showFvg
         if low > high[2]
@@ -260,11 +288,6 @@ motor() =>
         [tq, u] = objetivoP(dir, nv, ob, fv)
         oToque  := tq
         oUmbral := u
-        if not na(tq) and (dir == 1 ? high >= tq : low <= tq)
-            dir     := 0
-            oOrigen := na
-            oToque  := na
-            oUmbral := na
     // Foto de la vela anterior: así, con lookahead, no repinta
     var int          pDir  = 0
     var array<float> pTop  = array.new<float>()
@@ -438,11 +461,13 @@ borrarZona(Zona z) =>
         z.mid.delete()
 
 // Revisa cada zona activa: invalidación y reacción.
-// Devuelve [dirección, borde de origen]: 1 = compra, -1 = venta, 0 = ninguna.
-// El borde de origen es el lado de la zona que, si se cierra más allá, cancela la dirección.
+// Devuelve [dirección, borde de origen, ruptura]: 1 = compra, -1 = venta, 0 = ninguna.
+// El borde de origen es el lado de la zona que, si se cierra más allá, cambia la dirección.
+// Ruptura: una vela cierra al otro lado de la zona (por debajo de una alcista = venta; por encima de una bajista = compra).
 procesarZonas(array<Zona> arr) =>
-    int   dir   = 0
-    float borde = na
+    int   dir     = 0
+    float borde   = na
+    int   ruptura = 0
     if arr.size() > 0
         for i = arr.size() - 1 to 0
             z   = arr.get(i)
@@ -460,6 +485,8 @@ procesarZonas(array<Zona> arr) =>
             reacciona = aFavor and (toca or z.tocado)
             borrar = false
             if invalida or atascado
+                if invalida
+                    ruptura := z.alcista ? -1 : 1
                 borrar := true
             else if reacciona
                 // Solo vale una reacción: se marca con ✓ y se borra la zona
@@ -474,7 +501,7 @@ procesarZonas(array<Zona> arr) =>
             if borrar
                 borrarZona(z)
                 arr.remove(i)
-    [dir, borde]
+    [dir, borde, ruptura]
 
 limitar(array<Zona> arr) =>
     while arr.size() > maxZonas
@@ -482,9 +509,11 @@ limitar(array<Zona> arr) =>
 
 // =====================================================================
 // DIRECCIÓN DE 1H
-// Mientras una dirección está activa, se ignoran las señales a favor.
-// Una señal CONTRARIA (manipulación, vacío u OB) anula la dirección y pone la nueva.
-// La dirección termina cuando el precio llega al objetivo o una vela cierra más allá.
+// Señales: reacciones (✓), manipulaciones (M) y RUPTURAS (una vela cierra al otro lado de un alto/bajo, OB o vacío).
+// Una señal CONTRARIA cambia la dirección. Una RUPTURA a favor es continuación: se busca el siguiente objetivo.
+// Si una vela cierra más allá del OBJETIVO a favor: continuación hacia el siguiente objetivo.
+// Si una vela cierra más allá del ORIGEN de la señal: cambia de dirección.
+// Si el precio solo TOCA el objetivo, la dirección sigue: si reacciona ahí, la reacción la cambia.
 // =====================================================================
 var int    dir1h    = 0     // 1 = compra, -1 = venta, 0 = todavía sin señal
 var string origen   = ""
@@ -495,27 +524,19 @@ var float  objUmbral = na   // si una vela de 1H CIERRA más allá de este preci
 var string objTxt    = ""
 nuevaSenal = false
 
-// Precio en contra: cierra más allá del punto donde nació la señal
+// Ruptura del ORIGEN: el precio cierra más allá del punto donde nació la señal → cambia de dirección
 if dir1h != 0 and not na(objOrigen) and (dir1h == 1 ? close < objOrigen : close > objOrigen)
-    dir1h     := 0
-    origen    := "Cancelada: cerró más allá del origen de la señal"
-    tSenal    := time
-    objOrigen := na
-    objToque  := na
-    objUmbral := na
-    objTxt    := ""
-
-if dir1h != 0 and not na(objUmbral)
-    cierraMas = dir1h == 1 ? close > objUmbral : close < objUmbral
-    llega     = dir1h == 1 ? high >= objToque : low <= objToque
-    if cierraMas or llega
-        origen    := cierraMas ? "Cancelada: cerró más allá del objetivo" : "Objetivo alcanzado"
-        dir1h     := 0
-        tSenal    := time
-        objOrigen := na
-        objToque  := na
-        objUmbral := na
-        objTxt    := ""
+    dir1h      := -dir1h
+    origen     := "Rompió el origen: cambia a " + (dir1h == 1 ? "compra" : "venta")
+    tSenal     := time
+    objOrigen  := dir1h == 1 ? low : high
+    nuevaSenal := true
+// Ruptura del OBJETIVO a favor → continuación: se busca el siguiente objetivo
+else if dir1h != 0 and not na(objUmbral) and (dir1h == 1 ? close > objUmbral : close < objUmbral)
+    origen     := "Rompió el objetivo: continuación"
+    tSenal     := time
+    objOrigen  := dir1h == 1 ? low : high
+    nuevaSenal := true
 
 // Solo se acepta una señal nueva si no hay dirección activa (o si la activa no tiene objetivo)
 libre = dir1h == 0 or na(objUmbral)
@@ -549,6 +570,21 @@ if niveles.size() > 0
             roto     := not dentro and n.cuenta >= maxVelas
         if cerroFuera
             n.estado := 1
+            // Ruptura del nivel: la vela cierra fuera → dirección hacia donde rompe
+            // (si vuelve a cerrar dentro en 4 velas, será manipulación y cambiará al revés)
+            dR = n.esAlto ? 1 : -1
+            if libre or dR == -dir1h
+                dir1h      := dR
+                origen     := n.esAlto ? "Ruptura de alto" : "Ruptura de bajo"
+                tSenal     := time
+                objOrigen  := dR == 1 ? low : high
+                nuevaSenal := true
+                libre      := false
+            else if dR == dir1h
+                origen     := (n.esAlto ? "Ruptura de alto" : "Ruptura de bajo") + " (continuación)"
+                tSenal     := time
+                objOrigen  := dR == 1 ? low : high
+                nuevaSenal := true
         if manip
             if nivelVisible(n.esAlto)
                 label.new(bar_index, n.precio, "M", style = n.esAlto ? label.style_label_down : label.style_label_up, color = colManip, textcolor = color.white, size = size.small)
@@ -632,7 +668,7 @@ if esMenor and dirHTF != dirHTF[1]
 // =====================================================================
 // 3) VACÍOS Y ORDER BLOCKS: primero se revisan los que ya existen...
 // =====================================================================
-[dirFvg, bordeFvg] = procesarZonas(fvgs)
+[dirFvg, bordeFvg, rupFvg] = procesarZonas(fvgs)
 // Una señal CONTRARIA (vacío u OB) anula la dirección actual: empieza la distribución hacia el otro lado
 if dirFvg != 0 and (libre or dirFvg == -dir1h)
     dir1h      := dirFvg
@@ -641,7 +677,21 @@ if dirFvg != 0 and (libre or dirFvg == -dir1h)
     objOrigen  := bordeFvg
     nuevaSenal := true
     libre      := false
-[dirOb, bordeOb] = procesarZonas(obs)
+// Ruptura de un vacío: cierre al otro lado → dirección hacia donde rompe
+if rupFvg != 0
+    if libre or rupFvg == -dir1h
+        dir1h      := rupFvg
+        origen     := rupFvg == 1 ? "Ruptura de vacío bajista" : "Ruptura de vacío alcista"
+        tSenal     := time
+        objOrigen  := rupFvg == 1 ? low : high
+        nuevaSenal := true
+        libre      := false
+    else if rupFvg == dir1h
+        origen     := (rupFvg == 1 ? "Ruptura de vacío bajista" : "Ruptura de vacío alcista") + " (continuación)"
+        tSenal     := time
+        objOrigen  := rupFvg == 1 ? low : high
+        nuevaSenal := true
+[dirOb, bordeOb, rupOb] = procesarZonas(obs)
 if dirOb != 0 and (libre or dirOb == -dir1h)
     dir1h      := dirOb
     origen     := dirOb == 1 ? "Reacción en OB alcista" : "Reacción en OB bajista"
@@ -649,6 +699,20 @@ if dirOb != 0 and (libre or dirOb == -dir1h)
     objOrigen  := bordeOb
     nuevaSenal := true
     libre      := false
+// Ruptura de un OB: cierre al otro lado del cuerpo → dirección hacia donde rompe
+if rupOb != 0
+    if libre or rupOb == -dir1h
+        dir1h      := rupOb
+        origen     := rupOb == 1 ? "Ruptura de OB bajista" : "Ruptura de OB alcista"
+        tSenal     := time
+        objOrigen  := rupOb == 1 ? low : high
+        nuevaSenal := true
+        libre      := false
+    else if rupOb == dir1h
+        origen     := (rupOb == 1 ? "Ruptura de OB bajista" : "Ruptura de OB alcista") + " (continuación)"
+        tSenal     := time
+        objOrigen  := rupOb == 1 ? low : high
+        nuevaSenal := true
 
 // ...y luego se buscan los nuevos (así empiezan a contar desde la vela siguiente)
 
@@ -893,14 +957,6 @@ if nuevaSenal
     objToque  := tq
     objUmbral := u
     objTxt    := t
-    // Si en la misma vela de la señal el precio ya llegó al objetivo, la distribución ya terminó
-    if not na(tq) and (dir1h == 1 ? high >= tq : low <= tq)
-        origen    := "Objetivo alcanzado"
-        dir1h     := 0
-        objOrigen := na
-        objToque  := na
-        objUmbral := na
-        objTxt    := ""
 
 // =====================================================================
 // PANEL CON LA DIRECCIÓN DE 1H (solo se ve en 1H)
@@ -915,7 +971,7 @@ if barstate.islast and esH1
     table.cell(panel, 0, 1, txt, bgcolor = col, text_color = color.white, text_size = size.large)
     table.cell(panel, 0, 2, det, bgcolor = color.new(color.black, 20), text_color = color.white, text_size = size.small)
     table.cell(panel, 0, 3, dir1h != 0 ? "Objetivo: " + objTxt : "", bgcolor = color.new(color.black, 20), text_color = color.yellow, text_size = size.small)
-    inval = dir1h != 0 and not na(objOrigen) ? "Se cancela si cierra " + (dir1h == 1 ? "por debajo de " : "por encima de ") + str.tostring(objOrigen, format.mintick) : ""
+    inval = dir1h != 0 and not na(objOrigen) ? "Cambia de dirección si cierra " + (dir1h == 1 ? "por debajo de " : "por encima de ") + str.tostring(objOrigen, format.mintick) : ""
     table.cell(panel, 0, 4, inval, bgcolor = color.new(color.black, 20), text_color = color.orange, text_size = size.small)
 
 // =====================================================================
@@ -938,6 +994,13 @@ if barstate.islast and esM1
         est := "Esperando que el precio toque una zona de 5m"
     table.cell(panel1, 0, 0, dTxt, bgcolor = dCol, text_color = color.white, text_size = size.normal)
     table.cell(panel1, 0, 1, est, bgcolor = color.new(color.black, 20), text_color = color.white, text_size = size.small)
+
+// =====================================================================
+// FONDO DE COLOR: dirección de 1H en cada momento (verde = compra, rojo = venta)
+// =====================================================================
+colorDir(int d) =>
+    d == 1 ? color.new(color.green, 88) : d == -1 ? color.new(color.red, 88) : color(na)
+bgcolor(showBg ? (esH1 ? colorDir(dir1h) : esMenor ? colorDir(dirHTF) : color(na)) : color(na), title = "Dirección de 1H")
 
 // Alertas opcionales: solo avisan si las activas tú en TradingView (Crear alerta → este indicador)
 alertcondition(entradaCompra, "Entrada COMPRA (1m)", "XAUUSD: entrada de COMPRA en 1 minuto")
