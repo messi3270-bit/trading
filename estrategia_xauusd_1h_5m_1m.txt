@@ -728,24 +728,11 @@ entradaCompra = false
 entradaVenta  = false
 
 if esM1
-    // 0) Si cambia la dirección de 1H: se cancela todo lo que vaya en contra.
-    //    Nunca puede haber una búsqueda ni una operación abierta en contra de la dirección de 1H.
+    // 0) Si cambia la dirección de 1H: las búsquedas de entrada de la dirección anterior se reinician.
+    //    Las operaciones ya abiertas NO se tocan: siguen hasta su TP o su SL.
     if dirHTF != dirHTF[1]
         busquedas.clear()
         limpiarObs1()
-        if abiertas.size() > 0
-            for i = abiertas.size() - 1 to 0
-                op = abiertas.get(i)
-                if (op.compra ? 1 : -1) != dirHTF
-                    op.lEnt.delete()
-                    op.lTp.delete()
-                    op.lSl.delete()
-                    op.eEnt.delete()
-                    op.eTp.delete()
-                    op.eSl.delete()
-                    op.marca.set_text((op.compra ? "▲" : "▼") + " cancelada (1H cambió)")
-                    op.marca.set_color(color.gray)
-                    abiertas.remove(i)
 
     // 1) Al cerrar cada vela de 5m: ¿se rompió la zona de 5m de alguna búsqueda?
     if nueva5 and not na(v5c)
@@ -854,7 +841,14 @@ if esM1
                     eEnt = label.new(bar_index, close, (o.alcista ? "COMPRA " : "VENTA ") + str.tostring(close, format.mintick), style = label.style_label_right, color = color.blue, textcolor = color.white, size = size.small)
                     eTp  = label.new(bar_index, tp, "TP " + str.tostring(tp, format.mintick), style = label.style_label_right, color = color.green, textcolor = color.white, size = size.small)
                     eSl  = label.new(bar_index, sl, "SL " + str.tostring(sl, format.mintick), style = label.style_label_right, color = color.red, textcolor = color.white, size = size.small)
-                    marca = label.new(bar_index, o.alcista ? low : high, o.alcista ? "▲" : "▼", style = o.alcista ? label.style_label_up : label.style_label_down, color = color.blue, textcolor = color.white, size = size.tiny)
+                    // Qué zona de 5m originó la búsqueda (se ve al pasar el ratón por la marca)
+                    string zonaTxt = "sin datos"
+                    if busquedas.size() > 0
+                        b0 = busquedas.get(0)
+                        zonaTxt := b0.tipo == 2 ? ((b0.dir == 1 ? "Bajo" : "Alto") + " de 5m en " + str.tostring(b0.nivel, format.mintick)) : ((b0.tipo == 0 ? "OB" : "Vacío") + (b0.dir == 1 ? " alcista" : " bajista") + " de 5m " + str.tostring(b0.bot, format.mintick) + " – " + str.tostring(b0.top, format.mintick))
+                        zonaTxt := zonaTxt + "\nTocada: " + str.format_time(b0.tInicio, "dd/MM HH:mm", syminfo.timezone)
+                    tip = (o.alcista ? "COMPRA" : "VENTA") + "\nEntrada: " + str.tostring(close, format.mintick) + "\nSL: " + str.tostring(sl, format.mintick) + "\nTP: " + str.tostring(tp, format.mintick) + "\nOB 1m: " + str.tostring(o.bot, format.mintick) + " – " + str.tostring(o.top, format.mintick) + "\nZona: " + zonaTxt + "\n1H: " + (dirHTF == 1 ? "COMPRA" : "VENTA")
+                    marca = label.new(bar_index, o.alcista ? low : high, o.alcista ? "▲" : "▼", style = o.alcista ? label.style_label_up : label.style_label_down, color = color.blue, textcolor = color.white, size = size.tiny, tooltip = tip)
                     abiertas.push(Operacion.new(lEnt, lTp, lSl, eEnt, eTp, eSl, tp, sl, o.alcista, marca))
                     entradaCompra := o.alcista
                     entradaVenta  := not o.alcista
