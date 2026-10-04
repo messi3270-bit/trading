@@ -728,6 +728,25 @@ entradaCompra = false
 entradaVenta  = false
 
 if esM1
+    // 0) Si cambia la dirección de 1H: se cancela todo lo que vaya en contra.
+    //    Nunca puede haber una búsqueda ni una operación abierta en contra de la dirección de 1H.
+    if dirHTF != dirHTF[1]
+        busquedas.clear()
+        limpiarObs1()
+        if abiertas.size() > 0
+            for i = abiertas.size() - 1 to 0
+                op = abiertas.get(i)
+                if (op.compra ? 1 : -1) != dirHTF
+                    op.lEnt.delete()
+                    op.lTp.delete()
+                    op.lSl.delete()
+                    op.eEnt.delete()
+                    op.eTp.delete()
+                    op.eSl.delete()
+                    op.marca.set_text((op.compra ? "▲" : "▼") + " cancelada (1H cambió)")
+                    op.marca.set_color(color.gray)
+                    abiertas.remove(i)
+
     // 1) Al cerrar cada vela de 5m: ¿se rompió la zona de 5m de alguna búsqueda?
     if nueva5 and not na(v5c)
         for b in busquedas
