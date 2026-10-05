@@ -276,3 +276,9 @@ AVISO
 Material educativo. El indicador marca zonas y entradas según estas reglas, pero no
 garantiza resultados. Ningún resultado pasado o simulado garantiza resultados futuros.
 Probar primero en demo.
+
+F. DIRECCIÓN PEGAJOSA DE 1H (opción activada por defecto)
+  - Una vez que 1H tiene dirección, las señales contrarias (reacción, manipulación, ruptura) NO la cambian.
+  - Solo cambia cuando una vela cierra más allá del ORIGEN de la distribución (o si no hay dirección / no hay objetivo).
+  - Las señales a favor siguen contando como continuación.
+  - Backtest: la dirección dura ~10 h en vez de ~3,6 h; las entradas contrarias seguidas bajan mucho.

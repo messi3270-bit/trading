@@ -23,6 +23,7 @@ colObDn  = input.color(color.new(#E65100, 80), "OB bajista", group = grpO)
 
 grpE     = "Entrada (1 minuto)"
 margenSl = input.float(0.3, "Margen del stop loss más allá del high/low del OB de 1m (dólares; 3 pips = 0,30; 0 = justo en el high/low)", minval = 0.0, step = 0.1, group = grpE)
+pegajosa = input.bool(true, "Dirección de 1H pegajosa: solo cambia cuando se rompe el origen (no por señales contrarias)", group = grpE)
 
 minPrevios = input.int(30, "OB/vacíos de 5m tocados hasta X minutos ANTES del cambio de 1H también cuentan (0 = no)", minval = 0, group = grpE)
 
@@ -600,7 +601,7 @@ if niveles.size() > 0
             // Ruptura del nivel: la vela cierra fuera → dirección hacia donde rompe
             // (si vuelve a cerrar dentro en 4 velas, será manipulación y cambiará al revés)
             dR = n.esAlto ? 1 : -1
-            if libre or dR == -dir1h
+            if libre or (dR == -dir1h and not pegajosa)
                 dir1h      := dR
                 origen     := n.esAlto ? "Ruptura de alto" : "Ruptura de bajo"
                 tSenal     := time
@@ -625,7 +626,7 @@ if niveles.size() > 0
             // Manipulación de un alto = venta. Manipulación de un bajo = compra.
             // Una manipulación contraria anula la dirección actual y pone la nueva.
             dirM = n.esAlto ? -1 : 1
-            if libre or dirM == -dir1h
+            if libre or (dirM == -dir1h and not pegajosa)
                 dir1h      := n.esAlto ? -1 : 1
                 origen     := n.esAlto ? "Manipulación de alto" : "Manipulación de bajo"
                 tSenal     := time
@@ -697,7 +698,7 @@ if esMenor and dirHTF != dirHTF[1]
 // =====================================================================
 [dirFvg, bordeFvg, rupFvg] = procesarZonas(fvgs)
 // Una señal CONTRARIA (vacío u OB) anula la dirección actual: empieza la distribución hacia el otro lado
-if dirFvg != 0 and (libre or dirFvg == -dir1h)
+if dirFvg != 0 and (libre or (dirFvg == -dir1h and not pegajosa))
     dir1h      := dirFvg
     origen     := dirFvg == 1 ? "Reacción en vacío alcista" : "Reacción en vacío bajista"
     tSenal     := time
@@ -706,7 +707,7 @@ if dirFvg != 0 and (libre or dirFvg == -dir1h)
     libre      := false
 // Ruptura de un vacío: cierre al otro lado → dirección hacia donde rompe
 if rupFvg != 0
-    if libre or rupFvg == -dir1h
+    if libre or (rupFvg == -dir1h and not pegajosa)
         dir1h      := rupFvg
         origen     := rupFvg == 1 ? "Ruptura de vacío bajista" : "Ruptura de vacío alcista"
         tSenal     := time
@@ -719,7 +720,7 @@ if rupFvg != 0
         objOrigen  := rupFvg == 1 ? low : high
         nuevaSenal := true
 [dirOb, bordeOb, rupOb] = procesarZonas(obs)
-if dirOb != 0 and (libre or dirOb == -dir1h)
+if dirOb != 0 and (libre or (dirOb == -dir1h and not pegajosa))
     dir1h      := dirOb
     origen     := dirOb == 1 ? "Reacción en OB alcista" : "Reacción en OB bajista"
     tSenal     := time
@@ -728,7 +729,7 @@ if dirOb != 0 and (libre or dirOb == -dir1h)
     libre      := false
 // Ruptura de un OB: cierre al otro lado del cuerpo → dirección hacia donde rompe
 if rupOb != 0
-    if libre or rupOb == -dir1h
+    if libre or (rupOb == -dir1h and not pegajosa)
         dir1h      := rupOb
         origen     := rupOb == 1 ? "Ruptura de OB bajista" : "Ruptura de OB alcista"
         tSenal     := time
