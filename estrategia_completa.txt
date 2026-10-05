@@ -222,7 +222,8 @@ D4. STOP LOSS Y TAKE PROFIT
 - STOP LOSS: en el low (compra) o high (venta) que deja el OB de 1M al crearse:
   - Compra: el mínimo más bajo desde la vela del OB hasta la vela de entrada.
   - Venta: el máximo más alto desde la vela del OB hasta la vela de entrada.
-  - Justo en ese nivel, sin margen extra.
+  - Con un MARGEN de 3 pips = 3,00 dólares más allá de ese nivel (por debajo en compra,
+    por encima en venta). Ajustable en los ajustes del indicador.
 - TAKE PROFIT: relación 1:3 (3 veces la distancia entre la entrada y el stop).
 
 D5. DESPUÉS DE LA ENTRADA

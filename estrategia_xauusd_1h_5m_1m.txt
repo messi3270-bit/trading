@@ -21,6 +21,9 @@ showOb   = input.bool(true, "Mostrar order blocks", group = grpO)
 colObUp  = input.color(color.new(#FF9800, 80), "OB alcista", group = grpO)
 colObDn  = input.color(color.new(#E65100, 80), "OB bajista", group = grpO)
 
+grpE     = "Entrada (1 minuto)"
+margenSl = input.float(3.0, "Margen del stop loss más allá del high/low (dólares; 3 pips = 3,00)", minval = 0.0, step = 0.1, group = grpE)
+
 grpG     = "General"
 showBg   = input.bool(true, "Fondo de color con la dirección de 1H (1H y 5m)", group = grpG)
 maxDentro = input.int(4, "OB: máximo de velas que lo tocan (aunque no sean seguidas; si hay más, se invalida)", minval = 1, group = grpO)
@@ -931,8 +934,8 @@ if esM1
                 logE("OB 1m invalidado " + str.tostring(o.bot, format.mintick) + "–" + str.tostring(o.top, format.mintick))
                 borrar := true
             else if entra and dirHTF == (o.alcista ? 1 : -1)
-                // Stop loss: justo en el low (compra) o high (venta) que dejó el OB de 1m
-                sl = o.ext
+                // Stop loss: el low (compra) o high (venta) que dejó el OB de 1m, más el margen
+                sl = o.alcista ? o.ext - margenSl : o.ext + margenSl
                 riesgo = o.alcista ? close - sl : sl - close
                 if not na(sl) and riesgo > 0
                     tp = o.alcista ? close + 3 * riesgo : close - 3 * riesgo
