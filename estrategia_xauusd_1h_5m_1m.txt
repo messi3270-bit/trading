@@ -744,6 +744,9 @@ entradaVenta  = false
 var array<string> tocadas1h = array.new<string>()
 bloqueo1h = false
 string bloqueoTxt = ""
+int   nOb1hContra = 0
+float distOb1h    = na
+string obCercaTxt = "ninguno"
 
 // Toques de zonas de 5m de la dirección CONTRARIA a 1H. Si 1H cambia a esa dirección
 // dentro de la misma vela de 1H, el toque cuenta como requisito de 5m.
@@ -831,6 +834,11 @@ if esM1
                     t1 = z60Top.get(i)
                     b1 = z60Bot.get(i)
                     k1 = claveZona(9, t1, b1)
+                    nOb1hContra := nOb1hContra + 1
+                    dist1 = close > t1 ? close - t1 : close < b1 ? b1 - close : 0.0
+                    if na(distOb1h) or dist1 < distOb1h
+                        distOb1h   := dist1
+                        obCercaTxt := str.tostring(b1, format.mintick) + "–" + str.tostring(t1, format.mintick) + (tocadas1h.includes(k1) ? " (tocado)" : "")
                     if low <= t1 and high >= b1 and not tocadas1h.includes(k1)
                         tocadas1h.push(k1)
                     if tocadas1h.includes(k1)
@@ -1110,7 +1118,7 @@ if barstate.islast and esH1
 // PANEL DE ESTADO EN 1 MINUTO
 // =====================================================================
 // Solo se crea en 1 minuto (si no, tapa el panel de 1H)
-var table panel1 = esM1 ? table.new(position.top_right, 1, 11, border_width = 1) : na
+var table panel1 = esM1 ? table.new(position.top_right, 1, 12, border_width = 1) : na
 if barstate.islast and esM1
     dTxt = dirHTF == 1 ? "1H: ▲ COMPRA" : dirHTF == -1 ? "1H: ▼ VENTA" : "1H: sin dirección"
     dCol = dirHTF == 1 ? color.new(color.green, 10) : dirHTF == -1 ? color.new(color.red, 10) : color.new(color.gray, 10)
@@ -1128,6 +1136,8 @@ if barstate.islast and esM1
         est := "Esperando que el precio toque una zona de 5m"
     table.cell(panel1, 0, 0, dTxt, bgcolor = dCol, text_color = color.white, text_size = size.normal)
     table.cell(panel1, 0, 1, est, bgcolor = color.new(color.black, 20), text_color = color.white, text_size = size.small)
+    // Diagnóstico: OB de 1H en contra de la dirección que ve el indicador
+    table.cell(panel1, 0, 11, "OB 1H en contra: " + str.tostring(nOb1hContra) + " · más cercano: " + obCercaTxt, bgcolor = color.new(color.black, 40), text_color = color.orange, text_size = size.tiny, text_halign = text.align_left)
     // Registro de los últimos eventos (el más reciente arriba)
     table.cell(panel1, 0, 2, "Últimos eventos:", bgcolor = color.new(color.black, 40), text_color = color.yellow, text_size = size.tiny, text_halign = text.align_left)
     for k = 0 to 7
