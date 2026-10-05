@@ -255,7 +255,8 @@ def run(variant=None):
             if inval or ob1['dentro'] > MAXDENTRO:
                 borrar = True
             elif entra and dirHTF == (1 if ob1['alc'] else -1):
-                sl = ob1['ext']; riesgo = (c - sl) if ob1['alc'] else (sl - c)
+                buf = v.get('buf', 0.0)
+                sl = (ob1['ext'] - buf) if ob1['alc'] else (ob1['ext'] + buf); riesgo = (c - sl) if ob1['alc'] else (sl - c)
                 if riesgo > 0:
                     tp = c + RR * riesgo if ob1['alc'] else c - RR * riesgo
                     b0 = busq[0] if busq else None
