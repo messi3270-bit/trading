@@ -200,7 +200,7 @@ motor() =>
                 n.estado := 1
                 // Ruptura del nivel: dirección hacia donde rompe
                 dR = n.esAlto ? 1 : -1
-                if libre or dR == -dir
+                if libre or (dR == -dir and not pegajosa)
                     dir     := dR
                     oOrigen := dR == 1 ? low : high
                     nueva   := true
@@ -213,7 +213,7 @@ motor() =>
                 cAlto.push(n.esAlto)
             if manip or roto
                 dM = n.esAlto ? -1 : 1
-                if manip and (libre or dM == -dir)
+                if manip and (libre or (dM == -dir and not pegajosa))
                     dir     := dM
                     oOrigen := n.extremo
                     nueva   := true
@@ -244,13 +244,13 @@ motor() =>
         v.vivo := false
     // Reacciones en vacíos y OB
     [dF, bF, rupF] = procZonasP(fv)
-    if dF != 0 and (libre or dF == -dir)
+    if dF != 0 and (libre or (dF == -dir and not pegajosa))
         dir     := dF
         oOrigen := bF
         nueva   := true
         libre   := false
     if rupF != 0
-        if libre or rupF == -dir
+        if libre or (rupF == -dir and not pegajosa)
             dir     := rupF
             oOrigen := rupF == 1 ? low : high
             nueva   := true
@@ -259,13 +259,13 @@ motor() =>
             oOrigen := rupF == 1 ? low : high
             nueva   := true
     [dO, bO, rupO] = procZonasP(ob)
-    if dO != 0 and (libre or dO == -dir)
+    if dO != 0 and (libre or (dO == -dir and not pegajosa))
         dir     := dO
         oOrigen := bO
         nueva   := true
         libre   := false
     if rupO != 0
-        if libre or rupO == -dir
+        if libre or (rupO == -dir and not pegajosa)
             dir     := rupO
             oOrigen := rupO == 1 ? low : high
             nueva   := true
