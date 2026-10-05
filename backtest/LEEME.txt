@@ -1,0 +1,8 @@
+Backtest del indicador (réplica en Python de las reglas de Pine, modo historial)
+Datos: MetaQuotes-Demo, XAUUSD, sep-2025 a sep-2026 (H1, M5, M1). Hora = hora del servidor.
+Los CSV de datos no se suben al repositorio (pesan ~28 MB): colócalos como h1.csv, m5.csv, m1.csv.
+  python3 bt.py      -> simula y guarda res.pkl
+  python3 an.py      -> desglose de resultados
+  python3 var.py     -> variantes de reglas
+  python3 dirtest.py -> ¿la dirección de 1H predice el precio?
+operaciones_backtest.csv: todas las operaciones simuladas (para revisarlas en el gráfico).
