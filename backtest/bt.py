@@ -21,7 +21,8 @@ class Zon:
     __slots__ = ('top', 'bot', 'alc', 'fvg', 'tocado', 'dentro')
     def __init__(s, top, bot, alc, fvg): s.top = top; s.bot = bot; s.alc = alc; s.fvg = fvg; s.tocado = False; s.dentro = 0
 
-def motor(T, O, H, L, C, maxdist=MAXDIST):
+def motor(T, O, H, L, C, maxdist=MAXDIST, f=None):
+    f = f or {}
     """Devuelve por vela (estado DESPUÉS de cerrar la vela): dir, zonas, manipulaciones confirmadas, motivo del cambio."""
     nv, fv, ob = [], [], []
     d = 0; oOrig = None; oToq = None; oUmb = None; ult = 0; uA = None; uB = None
@@ -32,7 +33,9 @@ def motor(T, O, H, L, C, maxdist=MAXDIST):
         o, h, l, c = O[i], H[i], L[i], C[i]
         nueva = False; man = []; why = None
         if d != 0 and oOrig is not None and (c < oOrig if d == 1 else c > oOrig):
-            d = -d; oOrig = l if d == 1 else h; nueva = True; why = 'rompe_origen'
+            if f.get('origen') == 'nada': pass
+            elif f.get('origen') == 'neutro': d = 0; oOrig = None; oUmb = None; why = 'rompe_origen'
+            else: d = -d; oOrig = l if d == 1 else h; nueva = True; why = 'rompe_origen'
         elif d != 0 and oUmb is not None and (c > oUmb if d == 1 else c < oUmb):
             oOrig = l if d == 1 else h; nueva = True; why = 'continuacion_objetivo'
         libre = d == 0 or oUmb is None
@@ -52,7 +55,9 @@ def motor(T, O, H, L, C, maxdist=MAXDIST):
                 manip = dentro; roto = (not dentro) and nn.cuenta >= MAXVELAS
             if manip and nn.ext is not None and abs(nn.ext - nn.p) > maxdist:
                 manip = False; roto = True
-            if cf:
+            if cf and f.get('sin_rupturas'):
+                nn.estado = 1
+            if cf and not f.get('sin_rupturas'):
                 nn.estado = 1
                 dR = 1 if nn.alto else -1
                 if libre or dR == -d:
@@ -102,7 +107,7 @@ def motor(T, O, H, L, C, maxdist=MAXDIST):
                     z.tocado = toca
             if dz != 0 and (libre or dz == -d):
                 d = dz; oOrig = borde; nueva = True; libre = False; why = 'reaccion_' + nm
-            if rup != 0:
+            if rup != 0 and not f.get('sin_rupturas'):
                 if libre or rup == -d:
                     d = rup; oOrig = l if rup == 1 else h; nueva = True; libre = False; why = 'ruptura_' + nm
                 elif rup == d:
