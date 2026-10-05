@@ -18,8 +18,8 @@ class Niv:
     def __init__(s, p, alto): s.p = p; s.alto = alto; s.estado = 0; s.cuenta = 0; s.ext = None; s.vivo = True
 
 class Zon:
-    __slots__ = ('top', 'bot', 'alc', 'fvg', 'tocado', 'dentro')
-    def __init__(s, top, bot, alc, fvg): s.top = top; s.bot = bot; s.alc = alc; s.fvg = fvg; s.tocado = False; s.dentro = 0
+    __slots__ = ('top', 'bot', 'alc', 'fvg', 'tocado', 'dentro', 'tag')
+    def __init__(s, top, bot, alc, fvg, tag=False): s.top = top; s.bot = bot; s.alc = alc; s.fvg = fvg; s.tocado = False; s.dentro = 0; s.tag = tag
 
 def motor(T, O, H, L, C, maxdist=MAXDIST, f=None):
     f = f or {}
@@ -28,6 +28,7 @@ def motor(T, O, H, L, C, maxdist=MAXDIST, f=None):
     d = 0; oOrig = None; oToq = None; oUmb = None; ult = 0; uA = None; uB = None
     rIdx = None; rO = rC = None; vIdx = None; vO = vC = None
     out_dir, out_z, out_m, out_why = [], [], [], []
+    lastManUp = -999; lastManDn = -999
     n = len(T)
     for i in range(n):
         o, h, l, c = O[i], H[i], L[i], C[i]
@@ -64,7 +65,10 @@ def motor(T, O, H, L, C, maxdist=MAXDIST, f=None):
                     d = dR; oOrig = l if dR == 1 else h; nueva = True; libre = False; why = 'ruptura_nivel'
                 elif dR == d:
                     oOrig = l if dR == 1 else h; nueva = True; why = why or 'continuacion_nivel'
-            if manip: man.append((nn.p, nn.alto))
+            if manip:
+                man.append((nn.p, nn.alto))
+                if nn.alto: lastManDn = i
+                else: lastManUp = i
             if manip or roto:
                 dM = -1 if nn.alto else 1
                 if manip and (libre or dM == -d):
@@ -113,13 +117,13 @@ def motor(T, O, H, L, C, maxdist=MAXDIST, f=None):
                 elif rup == d:
                     oOrig = l if rup == 1 else h; nueva = True; why = why or ('continuacion_' + nm)
         if i >= 2:
-            if l > H[i - 2]: fv.append(Zon(l, H[i - 2], True, True))
-            if h < L[i - 2]: fv.append(Zon(L[i - 2], h, False, True))
+            if l > H[i - 2]: fv.append(Zon(l, H[i - 2], True, True, i - lastManUp <= 6))
+            if h < L[i - 2]: fv.append(Zon(L[i - 2], h, False, True, i - lastManDn <= 6))
         while len(fv) > MAXZONAS: fv.pop(0)
         if rIdx is not None and c > rO:
-            ob.append(Zon(rO, rC, True, False)); rIdx = None
+            ob.append(Zon(rO, rC, True, False, i - lastManUp <= 6)); rIdx = None
         if vIdx is not None and c < vO:
-            ob.append(Zon(vC, vO, False, False)); vIdx = None
+            ob.append(Zon(vC, vO, False, False, i - lastManDn <= 6)); vIdx = None
         while len(ob) > MAXZONAS: ob.pop(0)
         if c < o: rIdx = i; rO = o; rC = c
         if c > o: vIdx = i; vO = o; vC = c
@@ -137,7 +141,7 @@ def motor(T, O, H, L, C, maxdist=MAXDIST, f=None):
                             best = ds; toq = z.bot if d == 1 else z.top; umb = z.top if d == 1 else z.bot
             oToq = toq; oUmb = umb
         out_dir.append(d)
-        out_z.append([(z.top, z.bot, z.alc, True) for z in fv] + [(z.top, z.bot, z.alc, False) for z in ob])
+        out_z.append([(z.top, z.bot, z.alc, True, z.tag) for z in fv] + [(z.top, z.bot, z.alc, False, z.tag) for z in ob])
         out_m.append(man)
         out_why.append(why)
     return out_dir, out_z, out_m, out_why
@@ -201,7 +205,7 @@ def run(variant=None):
         # bloqueo por OB de 1H contrario
         bloqueo = False
         if dirHTF != 0 and v.get('bloqueo', True):
-            for (top, bot, alc, fvg) in zzH:
+            for (top, bot, alc, fvg, _tg) in zzH:
                 if not fvg and alc == (dirHTF == -1):
                     key = (top, bot)
                     if l <= top and h >= bot and key not in tocadas: tocadas.append(key)
@@ -213,22 +217,23 @@ def run(variant=None):
         desp5 = tCambio is None or (T5open - 5) >= tCambio
         if v.get('sin_despues'): desp = desp5 = True
         if desp and not bloqueo and not abiertas and not busq and dirHTF != 0:
-            for (top, bot, alc, fvg) in zz5:
+            for (top, bot, alc, fvg, tg) in zz5:
                 if alc == (dirHTF == 1) and not busq:
                     if fvg and v.get('sin_fvg5'): continue
                     if (not fvg) and v.get('sin_ob5'): continue
+                    if v.get('solo_tag') and not tg: continue
                     mid = (top + bot) / 2
                     toca = ((l <= mid) if alc else (h >= mid)) if fvg else ((l <= top) if alc else (h >= bot))
                     key = (1 if fvg else 0, top, bot)
                     if toca and key not in usadas:
                         usadas.append(key)
-                        busq.append(dict(dir=dirHTF, tipo=1 if fvg else 0, top=top, bot=bot, nivel=None, t=t, dentro5=0, fuera5=0, viva=True))
+                        busq.append(dict(dir=dirHTF, tipo=1 if fvg else 0, top=top, bot=bot, nivel=None, t=t, dentro5=0, fuera5=0, viva=True, tag=tg))
         if desp5 and not bloqueo and not abiertas and not busq and dirHTF != 0 and not v.get('sin_man5'):
             for (p, alto) in mm5:
                 key = (2, p, p)
                 if not busq and key not in usadas and (not alto if dirHTF == 1 else alto):
                     usadas.append(key)
-                    busq.append(dict(dir=dirHTF, tipo=2, top=None, bot=None, nivel=p, t=t, dentro5=0, fuera5=0, viva=True))
+                    busq.append(dict(dir=dirHTF, tipo=2, top=None, bot=None, nivel=p, t=t, dentro5=0, fuera5=0, viva=True, tag=True))
         while len(usadas) > 200: usadas.pop(0)
         if not busq: obs1.clear()
         # gestión de la operación abierta
@@ -256,7 +261,7 @@ def run(variant=None):
                     b0 = busq[0] if busq else None
                     op = dict(j=j, t=t, compra=ob1['alc'], ent=c, sl=sl, tp=tp, riesgo=riesgo, spread=S1[j] * 0.01,
                               zona=(['ob5', 'fvg5', 'man5'][b0['tipo']] if b0 else '?'), t_zona=(b0['t'] if b0 else None),
-                              why1h=dirWhy, ob1_size=ob1['top'] - ob1['bot'], ob1_t=ob1['t'], res=None, tsal=None)
+                              why1h=dirWhy, tag=(b0.get('tag') if b0 else None), ob1_size=ob1['top'] - ob1['bot'], ob1_t=ob1['t'], res=None, tsal=None)
                     abiertas.append(op); trades.append(op); entro = True
                 borrar = True
             else:
