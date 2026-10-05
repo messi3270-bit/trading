@@ -745,6 +745,38 @@ var array<string> tocadas1h = array.new<string>()
 bloqueo1h = false
 string bloqueoTxt = ""
 
+// Toques de zonas de 5m de la dirección CONTRARIA a 1H. Si 1H cambia a esa dirección
+// dentro de la misma vela de 1H, el toque cuenta como requisito de 5m.
+var array<Busqueda> pendientes = array.new<Busqueda>()
+
+claveB(Busqueda b) =>
+    b.tipo == 2 ? claveZona(2, b.nivel, b.nivel) : claveZona(b.tipo, b.top, b.bot)
+
+estaPendiente(string k) =>
+    r = false
+    for b in pendientes
+        if claveB(b) == k
+            r := true
+    r
+
+// ¿Se rompió la zona de 5m al cerrar la vela de 5m? (marca b.viva = false)
+evalRotura(Busqueda b) =>
+    if b.tipo == 0
+        // OB: una vela de 5m cierra al otro lado, o más de 4 velas de 5m seguidas dentro
+        enZona5   = v5l <= b.top and v5h >= b.bot
+        b.dentro5 := enZona5 ? b.dentro5 + 1 : 0
+        if (b.dir == 1 ? v5c < b.bot : v5c > b.top) or b.dentro5 > maxDentro
+            b.viva := false
+    else if b.tipo == 1
+        // Vacío: una vela de 5m cierra al otro lado
+        if b.dir == 1 ? v5c < b.bot : v5c > b.top
+            b.viva := false
+    else
+        // Manipulación: cierra fuera del nivel y no vuelve dentro en 4 velas de 5m = rompimiento real
+        b.fuera5 := (b.dir == 1 ? v5c < b.nivel : v5c > b.nivel) ? b.fuera5 + 1 : 0
+        if b.fuera5 > maxVelas
+            b.viva := false
+
 if esM1
     // 0) Si cambia la dirección de 1H: las búsquedas de entrada de la dirección anterior se reinician.
     //    Las operaciones ya abiertas NO se tocan: siguen hasta su TP o su SL.
@@ -752,25 +784,34 @@ if esM1
         busquedas.clear()
         limpiarObs1()
         logE("1H cambia a " + (dirHTF == 1 ? "COMPRA" : dirHTF == -1 ? "VENTA" : "sin dirección"))
+        // Requisito de 5m que ya ocurrió dentro de la vela de 1H que dio la señal (o la que está en curso)
+        if dirHTF != 0 and abiertas.size() == 0
+            tMin = time("60") - 3600000
+            int idx = -1
+            if pendientes.size() > 0
+                for i = 0 to pendientes.size() - 1
+                    pb = pendientes.get(i)
+                    if pb.dir == dirHTF and pb.viva and pb.tInicio >= tMin
+                        idx := i
+            if idx >= 0
+                pb = pendientes.get(idx)
+                usadas.push(claveB(pb))
+                busquedas.push(pb)
+                logE("Requisito 5m previo: " + descB(pb))
+        pendientes.clear()
 
     // 1) Al cerrar cada vela de 5m: ¿se rompió la zona de 5m de alguna búsqueda?
     if nueva5 and not na(v5c)
         for b in busquedas
-            if b.tipo == 0
-                // OB: una vela de 5m cierra al otro lado, o más de 4 velas de 5m seguidas dentro
-                enZona5   = v5l <= b.top and v5h >= b.bot
-                b.dentro5 := enZona5 ? b.dentro5 + 1 : 0
-                if (b.dir == 1 ? v5c < b.bot : v5c > b.top) or b.dentro5 > maxDentro
-                    b.viva := false
-            else if b.tipo == 1
-                // Vacío: una vela de 5m cierra al otro lado
-                if b.dir == 1 ? v5c < b.bot : v5c > b.top
-                    b.viva := false
-            else
-                // Manipulación: cierra fuera del nivel y no vuelve dentro en 4 velas de 5m = rompimiento real
-                b.fuera5 := (b.dir == 1 ? v5c < b.nivel : v5c > b.nivel) ? b.fuera5 + 1 : 0
-                if b.fuera5 > maxVelas
-                    b.viva := false
+            evalRotura(b)
+        for b in pendientes
+            evalRotura(b)
+    // Los toques pendientes solo valen si siguen vivos y son de las últimas 2 horas
+    if pendientes.size() > 0
+        for i = pendientes.size() - 1 to 0
+            pb = pendientes.get(i)
+            if not pb.viva or pb.tInicio < time - 7200000
+                pendientes.remove(i)
     if busquedas.size() > 0
         for i = busquedas.size() - 1 to 0
             if not busquedas.get(i).viva
@@ -835,6 +876,33 @@ if esM1
                     usadas.push(clave)
                     busquedas.push(Busqueda.new(dirHTF, 2, na, na, nv5, dirHTF == 1 ? low : high, time))
                     logE("Toca zona: " + descB(busquedas.get(0)))
+    // 3b) Toques de zonas de 5m de la dirección CONTRARIA a 1H: se guardan por si 1H cambia en esta vela
+    if dirHTF != 0 and not na(z5Top)
+        dOp = -dirHTF
+        if z5Top.size() > 0
+            for i = 0 to z5Top.size() - 1
+                alc = z5Alc.get(i)
+                if alc == (dOp == 1)
+                    t   = z5Top.get(i)
+                    bt  = z5Bot.get(i)
+                    fvg = z5Fvg.get(i)
+                    mid = (t + bt) / 2
+                    toca  = fvg ? (alc ? low <= mid : high >= mid) : (alc ? low <= t : high >= bt)
+                    clave = claveZona(fvg ? 1 : 0, t, bt)
+                    if toca and not usadas.includes(clave) and not estaPendiente(clave)
+                        pendientes.push(Busqueda.new(dOp, fvg ? 1 : 0, t, bt, na, alc ? low : high, time))
+    if dirHTF != 0 and not na(n5Niv)
+        dOp = -dirHTF
+        if n5Niv.size() > 0
+            for i = 0 to n5Niv.size() - 1
+                nv5   = n5Niv.get(i)
+                alto5 = n5Alto.get(i)
+                clave = claveZona(2, nv5, nv5)
+                if not usadas.includes(clave) and not estaPendiente(clave) and (dOp == 1 ? (not alto5 and low < nv5) : (alto5 and high > nv5))
+                    pendientes.push(Busqueda.new(dOp, 2, na, na, nv5, dOp == 1 ? low : high, time))
+    while pendientes.size() > 20
+        pendientes.shift()
+
     while usadas.size() > 200
         usadas.shift()
     if busquedas.size() == 0

@@ -176,6 +176,9 @@ D1. CUÁNDO EMPIEZA LA BÚSQUEDA
   - LLEGA AL 50 % de un vacío de 5M a favor, o
   - PASA UN POQUITO un bajo de 5M (en compra) o un alto de 5M (en venta).
 - No hace falta esperar al ✓ ni a la M en 5M: basta con el toque.
+- Si el requisito de 5M ocurre un poco ANTES de que 1H confirme la dirección (dentro de la
+  misma vela de 1H que da la señal), también cuenta: cuando 1H cambia, la búsqueda empieza
+  desde ese toque, siempre que la zona de 5M siga viva.
 - Solo hay UNA búsqueda a la vez. Si mientras se busca el precio toca otra zona de 5M,
   esa zona se ignora.
 - Cada zona de 5M se usa una sola vez.
