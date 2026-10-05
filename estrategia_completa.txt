@@ -91,9 +91,9 @@ A4. ORDER BLOCK (OB)
 - INVALIDACIÓN (lo que pase primero):
   - Una vela CIERRA al otro lado del cuerpo (por debajo en uno alcista, por encima en
     uno bajista), o
-  - hay MÁS DE 4 VELAS SEGUIDAS DENTRO del cuerpo (tocándolo con cuerpo o mecha) sin
-    reacción: no lo va a respetar, lo va a romper. Si una vela sale de la zona, la
-    cuenta vuelve a cero.
+  - MÁS DE 4 VELAS han tocado el cuerpo (con cuerpo o mecha) desde que se creó, AUNQUE
+    NO SEAN SEGUIDAS (el precio sube y baja alrededor del OB = consolidación): no lo va
+    a respetar, lo va a romper. Vale igual en 1H, 5M y 1M.
 - Significado: reacción en OB alcista = COMPRA; en OB bajista = VENTA.
 
 
@@ -233,7 +233,7 @@ D6. CUÁNDO SE CANCELA LA BÚSQUEDA (sin haber entrado)
 -----------------------------------------------------
 Solo cuando la zona de 5M se ROMPE (se invalida):
 - OB de 5M: una vela de 5M cierra al otro lado del cuerpo, o hay más de 4 velas de 5M
-  seguidas dentro.
+  dentro (aunque no sean seguidas).
 - Vacío de 5M: una vela de 5M cierra al otro lado del vacío.
 - Manipulación de 5M: el precio cierra fuera del nivel y no vuelve a cerrar dentro en
   4 velas de 5M (rompimiento real).
@@ -258,7 +258,7 @@ PARTE E — PARÁMETROS POR DEFECTO DEL INDICADOR
 =====================================
 - Velas a cada lado para confirmar un alto/bajo: 3.
 - Velas máximas para volver dentro en una manipulación: 4.
-- OB: máximo de velas seguidas dentro antes de invalidarse: 4 (con 5 se invalida).
+- OB: máximo de velas que lo tocan antes de invalidarse: 4 (con 5 se invalida), aunque no sean seguidas.
 - Máximo de vacíos activos: 15. Máximo de OB activos: 15. Máximo de altos/bajos: 30.
 - Relación del take profit: 1:3.
 

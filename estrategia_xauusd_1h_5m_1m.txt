@@ -22,7 +22,7 @@ colObDn  = input.color(color.new(#E65100, 80), "OB bajista", group = grpO)
 
 grpG     = "General"
 showBg   = input.bool(true, "Fondo de color con la dirección de 1H (1H y 5m)", group = grpG)
-maxDentro = input.int(4, "OB: máximo de velas seguidas dentro (si hay más, se invalida)", minval = 1, group = grpO)
+maxDentro = input.int(4, "OB: máximo de velas que lo tocan (aunque no sean seguidas; si hay más, se invalida)", minval = 1, group = grpO)
 maxZonas = input.int(15, "Máximo de vacíos / OB activos (de cada tipo)", minval = 1, group = grpG)
 maxNivel = input.int(30, "Máximo de altos/bajos activos", minval = 2, group = grpG)
 
@@ -49,7 +49,7 @@ type Zona
     bool  alcista
     bool  esFvg
     bool  tocado = false  // la vela anterior tocó la zona (50 % en FVG, cuerpo en OB)
-    int   dentro = 0      // velas seguidas dentro de la zona (solo se usa en OB)
+    int   dentro = 0      // velas que han tocado la zona desde que se creó, aunque no sean seguidas (solo OB)
     color col    = na     // color de la zona (para poder ocultarla y volver a mostrarla)
 
 // =====================================================================
@@ -84,7 +84,7 @@ procZonasP(array<ZonaP> arr) =>
             toca = z.esFvg ? (z.alcista ? low <= mid : high >= mid) : (z.alcista ? low <= z.top : high >= z.bot)
             invalida = z.alcista ? close < z.bot : close > z.top
             enZona   = low <= z.top and high >= z.bot
-            z.dentro := enZona ? z.dentro + 1 : 0
+            z.dentro := enZona ? z.dentro + 1 : z.dentro
             atascado = not z.esFvg and z.dentro > maxDentro
             aFavor    = z.alcista ? close > open : close < open
             reacciona = aFavor and (toca or z.tocado)
@@ -377,7 +377,7 @@ type Busqueda
     float nivel
     float extremo         // stop loss: mínimo más bajo (compra) o máximo más alto (venta) desde el toque
     int   tInicio
-    int   dentro5 = 0     // OB: velas de 5m seguidas dentro de la zona
+    int   dentro5 = 0     // OB: velas de 5m que han tocado la zona (aunque no sean seguidas)
     int   fuera5  = 0     // manipulación: velas de 5m seguidas cerradas fuera del nivel
     bool  viva    = true
 
@@ -489,9 +489,9 @@ procesarZonas(array<Zona> arr) =>
             toca = z.esFvg ? (z.alcista ? low <= mid : high >= mid) : (z.alcista ? low <= z.top : high >= z.bot)
             // Invalidación: una vela cierra al otro lado de la zona
             invalida = z.alcista ? close < z.bot : close > z.top
-            // OB: si hay más de "maxDentro" velas seguidas dentro del cuerpo, no lo va a respetar: se invalida
+            // OB: si más de "maxDentro" velas han tocado el cuerpo (aunque no sean seguidas) = consolidación: lo va a romper, se invalida
             enZona   = low <= z.top and high >= z.bot
-            z.dentro := enZona ? z.dentro + 1 : 0
+            z.dentro := enZona ? z.dentro + 1 : z.dentro
             atascado = not z.esFvg and z.dentro > maxDentro
             // Reacción: la vela que toca cierra a favor, o la vela anterior tocó y esta cierra a favor
             aFavor    = z.alcista ? close > open : close < open
@@ -765,9 +765,9 @@ estaPendiente(string k) =>
 // ¿Se rompió la zona de 5m al cerrar la vela de 5m? (marca b.viva = false)
 evalRotura(Busqueda b) =>
     if b.tipo == 0
-        // OB: una vela de 5m cierra al otro lado, o más de 4 velas de 5m seguidas dentro
+        // OB: una vela de 5m cierra al otro lado, o más de 4 velas de 5m lo han tocado (aunque no sean seguidas)
         enZona5   = v5l <= b.top and v5h >= b.bot
-        b.dentro5 := enZona5 ? b.dentro5 + 1 : 0
+        b.dentro5 := enZona5 ? b.dentro5 + 1 : b.dentro5
         if (b.dir == 1 ? v5c < b.bot : v5c > b.top) or b.dentro5 > maxDentro
             b.viva := false
     else if b.tipo == 1
@@ -947,7 +947,7 @@ if esM1
             toca     = o.alcista ? low <= o.top : high >= o.bot
             invalida = o.alcista ? close < o.bot : close > o.top
             enZona   = low <= o.top and high >= o.bot
-            o.dentro := enZona ? o.dentro + 1 : 0
+            o.dentro := enZona ? o.dentro + 1 : o.dentro
             entra    = (o.tocado or toca) and (o.alcista ? close > o.top : close < o.bot)
             borrar   = false
             if invalida or o.dentro > maxDentro
