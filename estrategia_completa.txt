@@ -174,7 +174,9 @@ D1. CUÁNDO EMPIEZA LA BÚSQUEDA
 - La búsqueda empieza en el momento en que el precio, en 1M:
   - TOCA EL CUERPO de un OB de 5M a favor, o
   - LLEGA AL 50 % de un vacío de 5M a favor, o
-  - PASA UN POQUITO un bajo de 5M (en compra) o un alto de 5M (en venta).
+  - hay una MANIPULACIÓN CONFIRMADA de un bajo de 5M (en compra) o de un alto de 5M (en venta):
+    la vela pasa el nivel y cierra dentro, o cierra fuera y vuelve dentro en 4 velas de 5M.
+    Si el precio pasa el nivel y sigue de largo (rompimiento), NO cuenta.
 - No hace falta esperar al ✓ ni a la M en 5M: basta con el toque.
 - Si el requisito de 5M ocurre un poco ANTES de que 1H confirme la dirección (dentro de la
   misma vela de 1H que da la señal), también cuenta: cuando 1H cambia, la búsqueda empieza

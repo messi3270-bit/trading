@@ -131,7 +131,7 @@ objetivoP(int d, array<NivelP> nv, array<ZonaP> ob, array<ZonaP> fv) =>
     [toque, umbral]
 
 // Devuelve la foto de la VELA ANTERIOR (cerrada) de esa temporalidad:
-// [dirección, techos, suelos, ¿alcista?, ¿es vacío?, niveles, ¿es alto?, dirección de la vela ACTUAL]
+// [dirección, techos, suelos, ¿alcista?, ¿es vacío?, manipulaciones confirmadas (nivel), ¿era un alto?, dirección de la vela ACTUAL]
 // dirección: 1 = compra, -1 = venta, 0 = sin dirección
 motor() =>
     var array<NivelP> nv = array.new<NivelP>()
@@ -151,6 +151,9 @@ motor() =>
     var float  vO      = na
     var float  vC      = na
     nueva = false
+    // Manipulaciones confirmadas en esta vela (nivel y si era un alto)
+    cNiv  = array.new<float>()
+    cAlto = array.new<bool>()
     // Ruptura del origen: cambia de dirección. Ruptura del objetivo a favor: continuación.
     if dir != 0 and not na(oOrigen) and (dir == 1 ? close < oOrigen : close > oOrigen)
         dir     := -dir
@@ -194,6 +197,9 @@ motor() =>
                 else if dR == dir
                     oOrigen := dR == 1 ? low : high
                     nueva   := true
+            if manip
+                cNiv.push(n.precio)
+                cAlto.push(n.esAlto)
             if manip or roto
                 dM = n.esAlto ? -1 : 1
                 if manip and (libre or dM == -dir)
@@ -307,8 +313,6 @@ motor() =>
     cBot  = array.new<float>()
     cAlc  = array.new<bool>()
     cFvg  = array.new<bool>()
-    cNiv  = array.new<float>()
-    cAlto = array.new<bool>()
     for z in fv
         cTop.push(z.top)
         cBot.push(z.bot)
@@ -319,10 +323,6 @@ motor() =>
         cBot.push(z.bot)
         cAlc.push(z.alcista)
         cFvg.push(false)
-    for n in nv
-        if n.vivo and n.estado == 0
-            cNiv.push(n.precio)
-            cAlto.push(n.esAlto)
     pDir  := dir
     pTop  := cTop
     pBot  := cBot
@@ -879,8 +879,9 @@ if esM1
                 nv5   = n5Niv.get(i)
                 alto5 = n5Alto.get(i)
                 clave = claveZona(2, nv5, nv5)
-                // Compra: pasa un poquito un bajo. Venta: pasa un poquito un alto.
-                if busquedas.size() == 0 and not usadas.includes(clave) and (dirHTF == 1 ? (not alto5 and low < nv5) : (alto5 and high > nv5))
+                // Solo manipulaciones CONFIRMADAS en 5m (cerró dentro, o volvió dentro en 4 velas).
+                // Compra: manipulación de un bajo. Venta: manipulación de un alto.
+                if busquedas.size() == 0 and not usadas.includes(clave) and (dirHTF == 1 ? not alto5 : alto5)
                     usadas.push(clave)
                     busquedas.push(Busqueda.new(dirHTF, 2, na, na, nv5, dirHTF == 1 ? low : high, time))
                     logE("Toca zona: " + descB(busquedas.get(0)))
@@ -906,7 +907,7 @@ if esM1
                 nv5   = n5Niv.get(i)
                 alto5 = n5Alto.get(i)
                 clave = claveZona(2, nv5, nv5)
-                if not usadas.includes(clave) and not estaPendiente(clave) and (dOp == 1 ? (not alto5 and low < nv5) : (alto5 and high > nv5))
+                if not usadas.includes(clave) and not estaPendiente(clave) and (dOp == 1 ? not alto5 : alto5)
                     pendientes.push(Busqueda.new(dOp, 2, na, na, nv5, dOp == 1 ? low : high, time))
     while pendientes.size() > 20
         pendientes.shift()
