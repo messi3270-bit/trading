@@ -7,6 +7,7 @@ indicator("Estrategia XAUUSD · Paso 1 (1H) + Paso 2 (5m) + Paso 3 (1m)", shortt
 grpN     = "Altos y bajos / Manipulaciones"
 pivLen   = input.int(3, "Velas a cada lado para confirmar un alto/bajo", minval = 1, group = grpN)
 maxVelas = input.int(4, "Velas máximas para volver dentro (manipulación)", minval = 1, group = grpN)
+maxDist  = input.float(2.0, "Puntos máximos que puede alejarse del nivel (si se aleja más, es rompimiento)", minval = 0.1, step = 0.1, group = grpN)
 colNivel = input.color(color.gray, "Color altos/bajos sin tocar", group = grpN)
 colManip = input.color(color.red, "Color manipulación", group = grpN)
 
@@ -185,6 +186,10 @@ motor() =>
                 n.extremo := n.esAlto ? math.max(n.extremo, high) : math.min(n.extremo, low)
                 manip := dentro
                 roto  := not dentro and n.cuenta >= maxVelas
+            // Si el precio se alejó demasiado del nivel, es un rompimiento y no una manipulación
+            if manip and not na(n.extremo) and math.abs(n.extremo - n.precio) > maxDist
+                manip := false
+                roto  := true
             if cf
                 n.estado := 1
                 // Ruptura del nivel: dirección hacia donde rompe
@@ -581,6 +586,10 @@ if niveles.size() > 0
             n.extremo := n.esAlto ? math.max(n.extremo, high) : math.min(n.extremo, low)
             manip    := dentro
             roto     := not dentro and n.cuenta >= maxVelas
+        // Si el precio se alejó demasiado del nivel, es un rompimiento y no una manipulación
+        if manip and not na(n.extremo) and math.abs(n.extremo - n.precio) > maxDist
+            manip := false
+            roto  := true
         if cerroFuera
             n.estado := 1
             // Ruptura del nivel: la vela cierra fuera → dirección hacia donde rompe

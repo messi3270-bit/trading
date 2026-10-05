@@ -37,6 +37,8 @@ A2. MANIPULACIÓN (FALSO ROMPIMIENTO)
     (por debajo del alto, o por encima del bajo). Es manipulación en esa misma vela.
   - TIPO 2, CON CIERRE FUERA: la vela CIERRA FUERA del nivel, pero en las
     4 VELAS SIGUIENTES (como máximo) una vela vuelve a cerrar dentro.
+- Si el precio se aleja MÁS DE 2 PUNTOS del nivel (ajustable) antes de volver, ya no es
+  manipulación: es un rompimiento. Aunque la mecha vuelva a cerrar dentro, no cuenta.
 - Si en esas 4 velas no vuelve a cerrar dentro, es un ROMPIMIENTO REAL: no se marca
   nada y el nivel se quita.
 - Significado:
