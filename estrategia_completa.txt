@@ -180,9 +180,11 @@ D1. CUÁNDO EMPIEZA LA BÚSQUEDA
     la vela pasa el nivel y cierra dentro, o cierra fuera y vuelve dentro en 4 velas de 5M.
     Si el precio pasa el nivel y sigue de largo (rompimiento), NO cuenta.
 - No hace falta esperar al ✓ ni a la M en 5M: basta con el toque.
-- El requisito de 5M tiene que ocurrir DESPUÉS de la señal de 1H. Nunca cuenta la misma
-  jugada que dio la señal de 1H ni nada anterior a ella. Una manipulación de 5M solo vale si
-  la vela de 5M que la confirma empezó después del cambio de dirección de 1H.
+- Manipulaciones de 5M: solo valen si la vela de 5M que las confirma empezó DESPUÉS del
+  cambio de dirección de 1H. Nunca cuenta la misma jugada que dio la señal de 1H.
+- OB y vacíos de 5M: valen si se tocan después del cambio de 1H, o hasta 30 minutos ANTES
+  (mientras 1H iba en la dirección contraria), siempre que la zona siga viva. El número de
+  minutos es ajustable en el indicador (0 = solo después).
 - Solo hay UNA búsqueda a la vez. Si mientras se busca el precio toca otra zona de 5M,
   esa zona se ignora.
 - Cada zona de 5M se usa una sola vez.

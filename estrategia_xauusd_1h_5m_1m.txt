@@ -24,6 +24,8 @@ colObDn  = input.color(color.new(#E65100, 80), "OB bajista", group = grpO)
 grpE     = "Entrada (1 minuto)"
 margenSl = input.float(3.0, "Margen del stop loss más allá del high/low (dólares; 3 pips = 3,00)", minval = 0.0, step = 0.1, group = grpE)
 
+minPrevios = input.int(30, "OB/vacíos de 5m tocados hasta X minutos ANTES del cambio de 1H también cuentan (0 = no)", minval = 0, group = grpE)
+
 grpG     = "General"
 showBg   = input.bool(true, "Fondo de color con la dirección de 1H (1H y 5m)", group = grpG)
 maxDentro = input.int(4, "OB: máximo de velas que lo tocan (aunque no sean seguidas; si hay más, se invalida)", minval = 1, group = grpO)
@@ -801,8 +803,22 @@ if esM1
         busquedas.clear()
         limpiarObs1()
         logE("1H cambia a " + (dirHTF == 1 ? "COMPRA" : dirHTF == -1 ? "VENTA" : "sin dirección"))
-        // El requisito de 5m tiene que ocurrir DESPUÉS de la señal de 1H (nunca la misma jugada ni antes)
+        // Manipulaciones de 5m: solo valen si ocurren DESPUÉS de la señal de 1H (nunca la misma jugada)
         tCambio1h := time
+        // OB y vacíos de 5m tocados poco antes del cambio (mientras 1H iba en la otra dirección) también cuentan
+        if dirHTF != 0 and abiertas.size() == 0 and minPrevios > 0
+            tMin = time - minPrevios * 60000
+            int idx = -1
+            if pendientes.size() > 0
+                for i = 0 to pendientes.size() - 1
+                    pb = pendientes.get(i)
+                    if pb.dir == dirHTF and pb.viva and pb.tInicio >= tMin
+                        idx := i
+            if idx >= 0
+                pb = pendientes.get(idx)
+                usadas.push(claveB(pb))
+                busquedas.push(pb)
+                logE("Requisito 5m previo: " + descB(pb))
         pendientes.clear()
 
     // 1) Al cerrar cada vela de 5m: ¿se rompió la zona de 5m de alguna búsqueda?
@@ -890,6 +906,24 @@ if esM1
                     usadas.push(clave)
                     busquedas.push(Busqueda.new(dirHTF, 2, na, na, nv5, dirHTF == 1 ? low : high, time))
                     logE("Toca zona: " + descB(busquedas.get(0)))
+
+    // 3b) Toques de OB y vacíos de 5m de la dirección CONTRARIA a 1H: se guardan por si 1H cambia enseguida
+    if minPrevios > 0 and dirHTF != 0 and not na(z5Top)
+        dOp = -dirHTF
+        if z5Top.size() > 0
+            for i = 0 to z5Top.size() - 1
+                alc = z5Alc.get(i)
+                if alc == (dOp == 1)
+                    t   = z5Top.get(i)
+                    bt  = z5Bot.get(i)
+                    fvg = z5Fvg.get(i)
+                    mid = (t + bt) / 2
+                    toca  = fvg ? (alc ? low <= mid : high >= mid) : (alc ? low <= t : high >= bt)
+                    clave = claveZona(fvg ? 1 : 0, t, bt)
+                    if toca and not usadas.includes(clave) and not estaPendiente(clave)
+                        pendientes.push(Busqueda.new(dOp, fvg ? 1 : 0, t, bt, na, alc ? low : high, time))
+    while pendientes.size() > 20
+        pendientes.shift()
 
     while usadas.size() > 200
         usadas.shift()
