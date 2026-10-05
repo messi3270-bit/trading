@@ -22,7 +22,7 @@ colObUp  = input.color(color.new(#FF9800, 80), "OB alcista", group = grpO)
 colObDn  = input.color(color.new(#E65100, 80), "OB bajista", group = grpO)
 
 grpE     = "Entrada (1 minuto)"
-margenSl = input.float(3.0, "Margen del stop loss más allá del high/low (dólares; 3 pips = 3,00)", minval = 0.0, step = 0.1, group = grpE)
+margenSl = input.float(0.3, "Margen del stop loss más allá del high/low del OB de 1m (dólares; 3 pips = 0,30; 0 = justo en el high/low)", minval = 0.0, step = 0.1, group = grpE)
 
 minPrevios = input.int(30, "OB/vacíos de 5m tocados hasta X minutos ANTES del cambio de 1H también cuentan (0 = no)", minval = 0, group = grpE)
 
