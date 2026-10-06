@@ -1,0 +1,591 @@
+//@version=6
+indicator("Estrategia XAUUSD · 5m (zonas) + 1m (entradas)", shorttitle = "5m+1m", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500, max_bars_back = 500)
+
+// =====================================================================
+// AJUSTES
+// =====================================================================
+grpN      = "5m: Altos y bajos / Manipulaciones"
+pivLen    = input.int(3, "Velas a cada lado para confirmar un alto/bajo", minval = 1, group = grpN)
+maxVelas  = input.int(4, "Velas máximas para volver dentro (manipulación)", minval = 1, group = grpN)
+maxDist   = input.float(2.0, "Puntos máximos que puede alejarse del nivel (si se aleja más, es rompimiento)", minval = 0.1, step = 0.1, group = grpN)
+colNivel  = input.color(color.gray, "Color altos/bajos sin tocar", group = grpN)
+colManip  = input.color(color.red, "Color manipulación", group = grpN)
+
+grpZ      = "5m: Zonas que activan la búsqueda en 1m"
+usarOb    = input.bool(true, "Order blocks de 5m", group = grpZ)
+usarFvg   = input.bool(true, "Vacíos (FVG) de 5m", group = grpZ)
+usarMan   = input.bool(true, "Manipulaciones de 5m", group = grpZ)
+maxDentro = input.int(4, "OB: máximo de velas que lo tocan (aunque no sean seguidas; si hay más, se invalida)", minval = 1, group = grpZ)
+maxZonas  = input.int(15, "Máximo de vacíos / OB activos (de cada tipo)", minval = 1, group = grpZ)
+maxNivel  = input.int(30, "Máximo de altos/bajos activos", minval = 2, group = grpZ)
+colFvgUp  = input.color(color.new(#42A5F5, 80), "Vacío alcista", group = grpZ)
+colFvgDn  = input.color(color.new(#1565C0, 80), "Vacío bajista", group = grpZ)
+colObUp   = input.color(color.new(#FF9800, 80), "OB alcista", group = grpZ)
+colObDn   = input.color(color.new(#E65100, 80), "OB bajista", group = grpZ)
+
+grpE      = "1m: Entrada"
+margenSl  = input.float(0.3, "Margen del stop loss más allá del high/low que deja el OB de 1m (dólares; 3 pips = 0,30; 0 = justo en el high/low)", minval = 0.0, step = 0.1, group = grpE)
+ratio     = input.float(3.0, "Take profit (veces el riesgo; 3 = 1:3)", minval = 0.5, step = 0.5, group = grpE)
+unaVez    = input.bool(true, "Solo una operación abierta a la vez (mientras haya una abierta no se busca)", group = grpE)
+col1Up    = input.color(color.new(#4CAF50, 75), "OB 1m alcista", group = grpE)
+col1Dn    = input.color(color.new(#F44336, 75), "OB 1m bajista", group = grpE)
+
+es5  = timeframe.period == "5"
+esM1 = timeframe.period == "1"
+
+// =====================================================================
+// MOTOR DE 5 MINUTOS (sin dibujos)
+// Reglas: altos/bajos alternados, manipulaciones confirmadas, vacíos (50 %) y order blocks (cuerpo).
+// =====================================================================
+type NivelP
+    int   id
+    float precio
+    bool  esAlto
+    int   x
+    int   estado  = 0     // 0 = esperando, 1 = una vela cerró fuera (contando velas)
+    int   cuenta  = 0
+    float extremo = na
+    bool  vivo    = true
+
+type ZonaP
+    int   id
+    float top
+    float bot
+    bool  alcista
+    bool  esFvg
+    int   x
+    bool  tocado = false
+    int   dentro = 0
+
+// Devuelve:
+//  - estado ACTUAL (para dibujar en 5m): zonas, niveles, manipulaciones y reacciones de esta vela
+//  - foto de la VELA ANTERIOR (para 1m con lookahead, sin repintar): zonas y manipulaciones
+motor5() =>
+    var array<NivelP> nv = array.new<NivelP>()
+    var array<ZonaP>  fv = array.new<ZonaP>()
+    var array<ZonaP>  ob = array.new<ZonaP>()
+    var int    sig     = 0
+    var int    ultTipo = 0
+    var NivelP uA      = na
+    var NivelP uB      = na
+    var int    rIdx    = na
+    var float  rO      = na
+    var float  rC      = na
+    var int    vIdx    = na
+    var float  vO      = na
+    var float  vC      = na
+    mId   = array.new<int>()
+    mPre  = array.new<float>()
+    mAlto = array.new<bool>()
+    eAlc  = array.new<bool>()
+    eFvg  = array.new<bool>()
+    // Manipulaciones: pasa el nivel y cierra dentro, o cierra fuera y vuelve dentro en "maxVelas" velas
+    if nv.size() > 0
+        for i = nv.size() - 1 to 0
+            n = nv.get(i)
+            if not n.vivo
+                nv.remove(i)
+                continue
+            manip  = false
+            roto   = false
+            dentro = n.esAlto ? close <= n.precio : close >= n.precio
+            if n.estado == 0
+                pasa = n.esAlto ? high > n.precio : low < n.precio
+                if pasa
+                    n.extremo := n.esAlto ? high : low
+                manip := pasa and dentro
+                if pasa and not dentro
+                    n.estado := 1
+            else
+                n.cuenta  := n.cuenta + 1
+                n.extremo := n.esAlto ? math.max(n.extremo, high) : math.min(n.extremo, low)
+                manip := dentro
+                roto  := not dentro and n.cuenta >= maxVelas
+            // Si se alejó demasiado del nivel, es un rompimiento y no una manipulación
+            if manip and not na(n.extremo) and math.abs(n.extremo - n.precio) > maxDist
+                manip := false
+                roto  := true
+            if manip
+                mId.push(n.id)
+                mPre.push(n.precio)
+                mAlto.push(n.esAlto)
+            if manip or roto
+                n.vivo := false
+                nv.remove(i)
+    // Altos y bajos alternados
+    ph = ta.pivothigh(high, pivLen, pivLen)
+    pl = ta.pivotlow(low, pivLen, pivLen)
+    if not na(ph)
+        rep = ultTipo == 1
+        if not rep or ph > uA.precio
+            if rep and uA.vivo and uA.estado == 0
+                uA.vivo := false
+            sig += 1
+            uA := NivelP.new(sig, ph, true, bar_index - pivLen)
+            nv.push(uA)
+            ultTipo := 1
+    if not na(pl)
+        rep = ultTipo == -1
+        if not rep or pl < uB.precio
+            if rep and uB.vivo and uB.estado == 0
+                uB.vivo := false
+            sig += 1
+            uB := NivelP.new(sig, pl, false, bar_index - pivLen)
+            nv.push(uB)
+            ultTipo := -1
+    while nv.size() > maxNivel
+        v = nv.shift()
+        v.vivo := false
+    // Vacíos: reacción al llegar al 50 % (una sola), invalidación al cerrar al otro lado
+    if fv.size() > 0
+        for i = fv.size() - 1 to 0
+            z    = fv.get(i)
+            mid  = (z.top + z.bot) / 2
+            toca = z.alcista ? low <= mid : high >= mid
+            invalida  = z.alcista ? close < z.bot : close > z.top
+            reacciona = (z.alcista ? close > open : close < open) and (toca or z.tocado)
+            if invalida
+                fv.remove(i)
+            else if reacciona
+                eAlc.push(z.alcista)
+                eFvg.push(true)
+                fv.remove(i)
+            else
+                z.tocado := toca
+    // OB: reacción al tocar el cuerpo (una sola), invalidación al cerrar al otro lado o si lo tocan más de "maxDentro" velas
+    if ob.size() > 0
+        for i = ob.size() - 1 to 0
+            z    = ob.get(i)
+            toca = z.alcista ? low <= z.top : high >= z.bot
+            z.dentro := (low <= z.top and high >= z.bot) ? z.dentro + 1 : z.dentro
+            invalida  = (z.alcista ? close < z.bot : close > z.top) or z.dentro > maxDentro
+            reacciona = (z.alcista ? close > open : close < open) and (toca or z.tocado)
+            if invalida
+                ob.remove(i)
+            else if reacciona
+                eAlc.push(z.alcista)
+                eFvg.push(false)
+                ob.remove(i)
+            else
+                z.tocado := toca
+    // Vacíos nuevos (3 velas)
+    if low > high[2]
+        sig += 1
+        fv.push(ZonaP.new(sig, low, high[2], true, true, bar_index - 2))
+    if high < low[2]
+        sig += 1
+        fv.push(ZonaP.new(sig, low[2], high, false, true, bar_index - 2))
+    while fv.size() > maxZonas
+        fv.shift()
+    // OB nuevos: última vela contraria; se crea cuando una vela cierra más allá de su apertura
+    if not na(rIdx) and close > rO
+        sig += 1
+        ob.push(ZonaP.new(sig, rO, rC, true, false, rIdx))
+        rIdx := na
+    if not na(vIdx) and close < vO
+        sig += 1
+        ob.push(ZonaP.new(sig, vC, vO, false, false, vIdx))
+        vIdx := na
+    while ob.size() > maxZonas
+        ob.shift()
+    if close < open
+        rIdx := bar_index
+        rO   := open
+        rC   := close
+    if close > open
+        vIdx := bar_index
+        vO   := open
+        vC   := close
+    // Estado actual
+    zId  = array.new<int>()
+    zTop = array.new<float>()
+    zBot = array.new<float>()
+    zAlc = array.new<bool>()
+    zFvg = array.new<bool>()
+    zX   = array.new<int>()
+    for z in fv
+        zId.push(z.id)
+        zTop.push(z.top)
+        zBot.push(z.bot)
+        zAlc.push(z.alcista)
+        zFvg.push(true)
+        zX.push(z.x)
+    for z in ob
+        zId.push(z.id)
+        zTop.push(z.top)
+        zBot.push(z.bot)
+        zAlc.push(z.alcista)
+        zFvg.push(false)
+        zX.push(z.x)
+    nId   = array.new<int>()
+    nPre  = array.new<float>()
+    nAlto = array.new<bool>()
+    nX    = array.new<int>()
+    for n in nv
+        if n.vivo
+            nId.push(n.id)
+            nPre.push(n.precio)
+            nAlto.push(n.esAlto)
+            nX.push(n.x)
+    // Foto de la vela anterior
+    var array<int>   pId   = array.new<int>()
+    var array<float> pTop  = array.new<float>()
+    var array<float> pBot  = array.new<float>()
+    var array<bool>  pAlc  = array.new<bool>()
+    var array<bool>  pFvg  = array.new<bool>()
+    var array<float> pmPre = array.new<float>()
+    var array<bool>  pmAlt = array.new<bool>()
+    oId   = pId
+    oTop  = pTop
+    oBot  = pBot
+    oAlc  = pAlc
+    oFvg  = pFvg
+    omPre = pmPre
+    omAlt = pmAlt
+    pId   := zId
+    pTop  := zTop
+    pBot  := zBot
+    pAlc  := zAlc
+    pFvg  := zFvg
+    pmPre := mPre
+    pmAlt := mAlto
+    [zId, zTop, zBot, zAlc, zFvg, zX, nId, nPre, nAlto, nX, mId, mPre, mAlto, eAlc, eFvg, oId, oTop, oBot, oAlc, oFvg, omPre, omAlt]
+
+// Estado de 5m en el propio gráfico (para dibujar en 5m)
+[zId, zTop, zBot, zAlc, zFvg, zX, nId, nPre, nAlto, nX, mId, mPre, mAlto, eAlc, eFvg, q1, q2, q3, q4, q5, q6, q7] = motor5()
+
+// Foto de la última vela CERRADA de 5m (para buscar entradas en 1m)
+[w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12, w13, w14, w15, sId, sTop, sBot, sAlc, sFvg, smPre, smAlto] = request.security(syminfo.tickerid, "5", motor5(), lookahead = barmerge.lookahead_on)
+
+// =====================================================================
+// DIBUJO EN 5 MINUTOS
+// =====================================================================
+var map<int, box>  cajas   = map.new<int, box>()
+var map<int, line> mitades = map.new<int, line>()
+var map<int, line> lineas  = map.new<int, line>()
+
+if es5
+    // Manipulaciones: la línea del nivel queda en rojo hasta aquí y se marca con "M"
+    if mId.size() > 0
+        for k = 0 to mId.size() - 1
+            alto = mAlto.get(k)
+            if usarMan
+                id = mId.get(k)
+                if lineas.contains(id)
+                    ln = lineas.get(id)
+                    ln.set_extend(extend.none)
+                    ln.set_x2(bar_index)
+                    ln.set_color(colManip)
+                    ln.set_style(line.style_solid)
+                    ln.set_width(2)
+                    lineas.remove(id)
+                label.new(bar_index, mPre.get(k), "M", style = alto ? label.style_label_down : label.style_label_up, color = colManip, textcolor = color.white, size = size.small, tooltip = alto ? "Manipulación de alto: VENTA" : "Manipulación de bajo: COMPRA")
+    // Niveles que ya no existen: se borran
+    for id in lineas.keys()
+        if not nId.includes(id)
+            lineas.get(id).delete()
+            lineas.remove(id)
+    // Niveles nuevos
+    if usarMan and nId.size() > 0
+        for k = 0 to nId.size() - 1
+            id = nId.get(k)
+            if not lineas.contains(id)
+                lineas.put(id, line.new(nX.get(k), nPre.get(k), bar_index, nPre.get(k), color = colNivel, style = line.style_dotted, extend = extend.right))
+    // Reacciones (✓)
+    if eAlc.size() > 0
+        for k = 0 to eAlc.size() - 1
+            alc = eAlc.get(k)
+            fvg = eFvg.get(k)
+            if fvg ? usarFvg : usarOb
+                c = fvg ? (alc ? colFvgUp : colFvgDn) : (alc ? colObUp : colObDn)
+                label.new(bar_index, alc ? low : high, "✓ " + (fvg ? "FVG" : "OB"), style = alc ? label.style_label_up : label.style_label_down, color = color.new(c, 0), textcolor = color.white, size = size.tiny)
+    // Zonas que ya no existen: se borran
+    for id in cajas.keys()
+        if not zId.includes(id)
+            cajas.get(id).delete()
+            cajas.remove(id)
+            if mitades.contains(id)
+                mitades.get(id).delete()
+                mitades.remove(id)
+    // Zonas nuevas
+    if zId.size() > 0
+        for k = 0 to zId.size() - 1
+            id  = zId.get(k)
+            fvg = zFvg.get(k)
+            if not cajas.contains(id) and (fvg ? usarFvg : usarOb)
+                alc = zAlc.get(k)
+                t   = zTop.get(k)
+                b   = zBot.get(k)
+                x   = zX.get(k)
+                c   = fvg ? (alc ? colFvgUp : colFvgDn) : (alc ? colObUp : colObDn)
+                cajas.put(id, box.new(x, t, bar_index, b, border_color = color.new(c, 40), bgcolor = c, extend = extend.right, text = fvg ? "FVG" : "OB", text_size = size.tiny, text_color = color.new(c, 0), text_halign = text.align_left))
+                if fvg
+                    mitades.put(id, line.new(x, (t + b) / 2, bar_index, (t + b) / 2, color = color.new(c, 0), style = line.style_dashed, extend = extend.right))
+
+// =====================================================================
+// 1 MINUTO: BÚSQUEDA Y ENTRADAS
+// =====================================================================
+// La búsqueda empieza cuando el precio toca una zona de 5m (OB: cuerpo; vacío: 50 %) o hay una manipulación confirmada en 5m.
+// Zona alcista o manipulación de bajo = solo compras. Zona bajista o manipulación de alto = solo ventas.
+type Busqueda
+    int   dir             // 1 = compra, -1 = venta
+    int   tipo            // 0 = OB, 1 = vacío, 2 = manipulación
+    float top
+    float bot
+    float nivel
+    box   bx
+    int   dentro5 = 0     // OB: velas de 5m que han tocado la zona
+    int   fuera5  = 0     // manipulación: velas de 5m seguidas cerradas fuera del nivel
+
+type OB1
+    float top
+    float bot
+    bool  alcista
+    bool  tocado = false
+    int   dentro = 0
+    box   bx
+    float ext             // low (compra) o high (venta) que dejó el OB, desde su vela hasta ahora
+
+type Operacion
+    line  lEnt
+    line  lTp
+    line  lSl
+    label eEnt
+    label eTp
+    label eSl
+    float tp
+    float sl
+    bool  compra
+    label marca
+
+var Busqueda         busq     = na
+var array<OB1>       obs1     = array.new<OB1>()
+var array<Operacion> abiertas = array.new<Operacion>()
+var array<int>       usadas   = array.new<int>()     // zonas de 5m que ya tuvieron su búsqueda
+var array<float>     usadasM  = array.new<float>()   // manipulaciones de 5m que ya tuvieron su búsqueda
+var int ganadas  = 0
+var int perdidas = 0
+
+// Registro de eventos (se ve en el panel de 1m)
+var array<string> logEv = array.new<string>()
+logE(string t) =>
+    logEv.push(str.format_time(time, "HH:mm", syminfo.timezone) + "  " + t)
+    if logEv.size() > 6
+        logEv.shift()
+
+limpiarObs1() =>
+    for o in obs1
+        o.bx.delete()
+    obs1.clear()
+
+descZona(int tipo, int d, float t, float b) =>
+    tipo == 2 ? ((d == 1 ? "bajo" : "alto") + " de 5m " + str.tostring(t, format.mintick)) : ((tipo == 0 ? "OB" : "vacío") + (d == 1 ? " alcista" : " bajista") + " de 5m " + str.tostring(b, format.mintick) + "–" + str.tostring(t, format.mintick))
+
+// Mínimo (o máximo) desde la vela "idx" hasta la vela actual
+extremoDesde(int idx, bool minimo) =>
+    float e = na
+    int n = math.min(bar_index - idx, 400)
+    for k = 0 to n
+        e := na(e) ? (minimo ? low[k] : high[k]) : (minimo ? math.min(e, low[k]) : math.max(e, high[k]))
+    e
+
+// Vela de 5 minutos construida con las velas de 1 minuto (para saber si se rompe la zona de 5m)
+var float v5h = na
+var float v5l = na
+var float v5c = na
+nueva5 = timeframe.change("5")
+
+var int   rojaIdx  = na
+var float rojaO    = na
+var float rojaC    = na
+var int   verdeIdx = na
+var float verdeO   = na
+var float verdeC   = na
+
+entradaCompra = false
+entradaVenta  = false
+
+if esM1
+    // 1) Operaciones abiertas: se cierran al tocar el TP o el SL (si toca los dos en la misma vela, cuenta como SL)
+    if abiertas.size() > 0
+        for i = abiertas.size() - 1 to 0
+            op     = abiertas.get(i)
+            tocaSl = op.compra ? low <= op.sl : high >= op.sl
+            tocaTp = op.compra ? high >= op.tp : low <= op.tp
+            if tocaSl or tocaTp
+                if tocaSl
+                    perdidas += 1
+                else
+                    ganadas += 1
+                logE((op.compra ? "COMPRA" : "VENTA") + (tocaSl ? " cerrada en SL ✗" : " cerrada en TP ✓"))
+                op.marca.set_text((op.compra ? "▲" : "▼") + (tocaSl ? " ✗" : " ✓"))
+                op.marca.set_color(tocaSl ? color.red : color.green)
+                op.lEnt.delete()
+                op.lTp.delete()
+                op.lSl.delete()
+                op.eEnt.delete()
+                op.eTp.delete()
+                op.eSl.delete()
+                abiertas.remove(i)
+
+    // 2) Al cerrar cada vela de 5m: ¿se rompió la zona de 5m que se está usando?
+    if nueva5 and not na(v5c) and not na(busq)
+        rota = false
+        if busq.tipo == 0
+            // OB: una vela de 5m cierra al otro lado, o lo tocan más de "maxDentro" velas de 5m
+            busq.dentro5 := (v5l <= busq.top and v5h >= busq.bot) ? busq.dentro5 + 1 : busq.dentro5
+            rota := (busq.dir == 1 ? v5c < busq.bot : v5c > busq.top) or busq.dentro5 > maxDentro
+        else if busq.tipo == 1
+            // Vacío: una vela de 5m cierra al otro lado
+            rota := busq.dir == 1 ? v5c < busq.bot : v5c > busq.top
+        else
+            // Manipulación: cierra fuera del nivel y no vuelve dentro en "maxVelas" velas de 5m
+            busq.fuera5 := (busq.dir == 1 ? v5c < busq.nivel : v5c > busq.nivel) ? busq.fuera5 + 1 : 0
+            rota := busq.fuera5 > maxVelas
+        if rota
+            logE("Zona de 5m rota: fin de la búsqueda")
+            busq.bx.delete()
+            busq := na
+            limpiarObs1()
+
+    // 3) Si no hay búsqueda: ¿el precio toca una zona de 5m que no se haya usado? (una búsqueda a la vez)
+    libreOp = not unaVez or abiertas.size() == 0
+    if na(busq) and libreOp and not na(sTop)
+        if sTop.size() > 0
+            for k = 0 to sTop.size() - 1
+                fvg = sFvg.get(k)
+                if na(busq) and (fvg ? usarFvg : usarOb)
+                    id  = sId.get(k)
+                    alc = sAlc.get(k)
+                    t   = sTop.get(k)
+                    b   = sBot.get(k)
+                    mid = (t + b) / 2
+                    toca = fvg ? (alc ? low <= mid : high >= mid) : (alc ? low <= t : high >= b)
+                    if toca and not usadas.includes(id)
+                        usadas.push(id)
+                        d  = alc ? 1 : -1
+                        tp = fvg ? 1 : 0
+                        c  = alc ? color.green : color.red
+                        bx = box.new(bar_index, t, bar_index + 1, b, border_color = color.new(c, 30), bgcolor = color.new(c, 90), extend = extend.right, text = descZona(tp, d, t, b), text_size = size.tiny, text_color = color.new(c, 0), text_halign = text.align_right)
+                        busq := Busqueda.new(d, tp, t, b, na, bx)
+                        logE("Toca " + descZona(tp, d, t, b) + ": busca " + (d == 1 ? "COMPRA" : "VENTA"))
+    // Manipulación confirmada en 5m (en la última vela cerrada de 5m)
+    if usarMan and na(busq) and libreOp and not na(smPre)
+        if smPre.size() > 0
+            for k = 0 to smPre.size() - 1
+                p = smPre.get(k)
+                if na(busq) and not usadasM.includes(p)
+                    usadasM.push(p)
+                    d  = smAlto.get(k) ? -1 : 1
+                    c  = d == 1 ? color.green : color.red
+                    bx = box.new(bar_index, p, bar_index + 1, p, border_color = color.new(c, 0), border_width = 2, bgcolor = color.new(c, 100), extend = extend.right, text = descZona(2, d, p, p), text_size = size.tiny, text_color = color.new(c, 0), text_halign = text.align_right, text_valign = text.align_bottom)
+                    busq := Busqueda.new(d, 2, p, p, p, bx)
+                    logE("Manipulación de " + descZona(2, d, p, p) + ": busca " + (d == 1 ? "COMPRA" : "VENTA"))
+    while usadas.size() > 300
+        usadas.shift()
+    while usadasM.size() > 300
+        usadasM.shift()
+
+    // 4) OB de 1m: el precio vuelve a tocarlo y la primera vela que cierra más allá del cuerpo es la entrada
+    entro = false
+    if obs1.size() > 0
+        for i = obs1.size() - 1 to 0
+            o = obs1.get(i)
+            o.ext := o.alcista ? math.min(o.ext, low) : math.max(o.ext, high)
+            toca     = o.alcista ? low <= o.top : high >= o.bot
+            invalida = o.alcista ? close < o.bot : close > o.top
+            o.dentro := (low <= o.top and high >= o.bot) ? o.dentro + 1 : o.dentro
+            entra    = (o.tocado or toca) and (o.alcista ? close > o.top : close < o.bot)
+            borrar   = false
+            if invalida or o.dentro > maxDentro
+                logE("OB 1m invalidado")
+                borrar := true
+            else if entra and not entro and not na(busq) and busq.dir == (o.alcista ? 1 : -1)
+                sl     = o.alcista ? o.ext - margenSl : o.ext + margenSl
+                riesgo = o.alcista ? close - sl : sl - close
+                if riesgo > 0
+                    tp   = o.alcista ? close + ratio * riesgo : close - ratio * riesgo
+                    lEnt = line.new(bar_index, close, bar_index + 1, close, color = color.blue, width = 2, extend = extend.right)
+                    lTp  = line.new(bar_index, tp, bar_index + 1, tp, color = color.green, width = 2, extend = extend.right)
+                    lSl  = line.new(bar_index, sl, bar_index + 1, sl, color = color.red, width = 2, extend = extend.right)
+                    eEnt = label.new(bar_index, close, (o.alcista ? "COMPRA " : "VENTA ") + str.tostring(close, format.mintick), style = label.style_label_right, color = color.blue, textcolor = color.white, size = size.small)
+                    eTp  = label.new(bar_index, tp, "TP " + str.tostring(tp, format.mintick), style = label.style_label_right, color = color.green, textcolor = color.white, size = size.small)
+                    eSl  = label.new(bar_index, sl, "SL " + str.tostring(sl, format.mintick), style = label.style_label_right, color = color.red, textcolor = color.white, size = size.small)
+                    tip  = (o.alcista ? "COMPRA" : "VENTA") + "\nEntrada: " + str.tostring(close, format.mintick) + "\nSL: " + str.tostring(sl, format.mintick) + "\nTP: " + str.tostring(tp, format.mintick) + "\nOB 1m: " + str.tostring(o.bot, format.mintick) + " – " + str.tostring(o.top, format.mintick) + "\nZona: " + descZona(busq.tipo, busq.dir, busq.top, busq.bot)
+                    marca = label.new(bar_index, o.alcista ? low : high, o.alcista ? "▲" : "▼", style = o.alcista ? label.style_label_up : label.style_label_down, color = color.blue, textcolor = color.white, size = size.tiny, tooltip = tip)
+                    abiertas.push(Operacion.new(lEnt, lTp, lSl, eEnt, eTp, eSl, tp, sl, o.alcista, marca))
+                    entradaCompra := o.alcista
+                    entradaVenta  := not o.alcista
+                    entro := true
+                    logE("ENTRADA " + (o.alcista ? "COMPRA " : "VENTA ") + str.tostring(close, format.mintick))
+                borrar := true
+            else
+                o.tocado := o.tocado or toca
+            if borrar
+                o.bx.delete()
+                obs1.remove(i)
+    // Una sola entrada por zona de 5m: después de entrar se termina la búsqueda
+    if entro and not na(busq)
+        busq.bx.delete()
+        busq := na
+        limpiarObs1()
+
+    // 5) OB de 1m nuevos: solo mientras hay búsqueda, y solo en la dirección de la búsqueda
+    if not na(rojaIdx) and close > rojaO
+        if not na(busq) and busq.dir == 1
+            bx = box.new(rojaIdx, rojaO, bar_index, rojaC, border_color = color.new(col1Up, 0), bgcolor = col1Up, extend = extend.right, text = "OB 1m", text_size = size.tiny, text_color = color.new(col1Up, 0), text_halign = text.align_left)
+            obs1.push(OB1.new(rojaO, rojaC, true, bx = bx, ext = extremoDesde(rojaIdx, true)))
+            logE("OB 1m alcista creado")
+        rojaIdx := na
+    if not na(verdeIdx) and close < verdeO
+        if not na(busq) and busq.dir == -1
+            bx = box.new(verdeIdx, verdeC, bar_index, verdeO, border_color = color.new(col1Dn, 0), bgcolor = col1Dn, extend = extend.right, text = "OB 1m", text_size = size.tiny, text_color = color.new(col1Dn, 0), text_halign = text.align_left)
+            obs1.push(OB1.new(verdeC, verdeO, false, bx = bx, ext = extremoDesde(verdeIdx, false)))
+            logE("OB 1m bajista creado")
+        verdeIdx := na
+
+    // Guarda la última vela roja y la última vela verde
+    if close < open
+        rojaIdx := bar_index
+        rojaO   := open
+        rojaC   := close
+    if close > open
+        verdeIdx := bar_index
+        verdeO   := open
+        verdeC   := close
+
+// Actualiza la vela de 5m construida con velas de 1m
+if nueva5
+    v5h := high
+    v5l := low
+else
+    v5h := math.max(v5h, high)
+    v5l := math.min(v5l, low)
+v5c := close
+
+// =====================================================================
+// PANEL
+// =====================================================================
+var table panel = table.new(position.top_right, 1, 10, border_width = 1)
+if barstate.islast
+    if esM1
+        total = ganadas + perdidas
+        string est = ""
+        if abiertas.size() > 0
+            est := "Operación abierta (" + (abiertas.get(0).compra ? "COMPRA" : "VENTA") + ")"
+        else if not na(busq)
+            est := "Buscando OB de 1m para " + (busq.dir == 1 ? "COMPRA" : "VENTA") + " en " + descZona(busq.tipo, busq.dir, busq.top, busq.bot)
+        else
+            est := "Esperando que el precio toque una zona de 5m"
+        table.cell(panel, 0, 0, "5m + 1m", bgcolor = color.new(color.black, 20), text_color = color.white, text_size = size.normal)
+        table.cell(panel, 0, 1, est, bgcolor = color.new(color.black, 20), text_color = color.white, text_size = size.small)
+        table.cell(panel, 0, 2, "✓ " + str.tostring(ganadas) + "   ✗ " + str.tostring(perdidas) + "   Acierto: " + (total > 0 ? str.tostring(100.0 * ganadas / total, "#.#") + " %" : "-"), bgcolor = color.new(color.black, 20), text_color = color.yellow, text_size = size.small)
+        table.cell(panel, 0, 3, "Últimos eventos:", bgcolor = color.new(color.black, 40), text_color = color.yellow, text_size = size.tiny, text_halign = text.align_left)
+        for k = 0 to 5
+            txtE = k < logEv.size() ? logEv.get(logEv.size() - 1 - k) : ""
+            table.cell(panel, 0, 4 + k, txtE, bgcolor = color.new(color.black, 40), text_color = color.white, text_size = size.tiny, text_halign = text.align_left)
+    else if not es5
+        table.cell(panel, 0, 0, "Ponlo en 5 minutos (zonas) o en 1 minuto (entradas)", bgcolor = color.new(color.gray, 20), text_color = color.white, text_size = size.small)
+
+alertcondition(entradaCompra, "Entrada COMPRA (1m)", "XAUUSD: entrada de COMPRA en 1 minuto")
+alertcondition(entradaVenta, "Entrada VENTA (1m)", "XAUUSD: entrada de VENTA en 1 minuto")
