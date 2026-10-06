@@ -105,8 +105,8 @@ if esM1
             if invalida or o.dentro > maxDentro
                 borrar := true
             else if entra
-                if unaVez and abiertas.size() > 0
-                    // Ya hay una operación abierta: este OB se descarta
+                if entro or (unaVez and abiertas.size() > 0)
+                    // Ya hay una operación abierta (o ya se entró en esta vela): este OB se descarta
                     borrar := true
                 else
                     sl     = o.alcista ? o.ext - margenSl : o.ext + margenSl
@@ -131,8 +131,6 @@ if esM1
             if borrar
                 o.bx.delete()
                 obs.remove(i)
-            if entro
-                break
 
     // 3) OB nuevos: última vela contraria antes del movimiento; se crea cuando una vela cierra más allá de su apertura (cuerpo)
     // OB alcista: una vela cierra por encima de la apertura de la última vela roja
