@@ -9,6 +9,7 @@ margenSl  = input.float(0.3, "Margen del stop loss más allá del high/low que d
 ratio     = input.float(3.0, "Take profit (veces el riesgo; 3 = 1:3)", minval = 0.5, step = 0.5, group = grpE)
 unaVez    = input.bool(true, "Solo una operación abierta a la vez", group = grpE)
 maxDentro = input.int(4, "OB: máximo de velas que lo tocan (aunque no sean seguidas; si hay más, se invalida)", minval = 1, group = grpE)
+pivLen1   = input.int(3, "1m: velas a cada lado para confirmar el low/high más cercano", minval = 1, group = grpE)
 
 grpO      = "Order Blocks"
 maxOb     = input.int(10, "Máximo de OB activos en pantalla", minval = 1, group = grpO)
@@ -28,7 +29,8 @@ type OB1
     int   dentro = 0       // velas que han tocado el cuerpo (aunque no sean seguidas)
     box   bx
     float ext              // low (compra) o high (venta) que dejó el OB, desde su vela hasta ahora
-    float lim             // low (compra) o high (venta) que dejó el OB al crearse: si una vela CIERRA más allá, el OB se invalida
+    float lim             // low (compra) / high (venta) MÁS CERCANO sin romper: si una vela CIERRA más allá, el OB se invalida
+    line  ln              // línea roja del low/high más cercano
 
 type Operacion
     line  lEnt
@@ -55,6 +57,36 @@ extremoDesde(int idx, bool minimo) =>
         e := na(e) ? (minimo ? low[k] : high[k]) : (minimo ? math.min(e, low[k]) : math.max(e, high[k]))
     e
 
+// Lows y highs de 1m confirmados que todavía no se han roto (ninguna vela ha pasado por debajo / por encima)
+var array<float> lows1  = array.new<float>()
+var array<float> highs1 = array.new<float>()
+pl1 = ta.pivotlow(low, pivLen1, pivLen1)
+ph1 = ta.pivothigh(high, pivLen1, pivLen1)
+
+// Low más cercano: el low sin romper más alto que esté en o por debajo de "ref" (si no hay, "ref")
+lowCercano(float ref) =>
+    float r = na
+    for p in lows1
+        if p <= ref and (na(r) or p > r)
+            r := p
+    na(r) ? ref : r
+
+// High más cercano: el high sin romper más bajo que esté en o por encima de "ref" (si no hay, "ref")
+highCercano(float ref) =>
+    float r = na
+    for p in highs1
+        if p >= ref and (na(r) or p < r)
+            r := p
+    na(r) ? ref : r
+
+// Crea un OB de 1m con su low/high más cercano (línea roja)
+nuevoOB1(bool alc, float top, float bot, int idx, color c) =>
+    mv  = extremoDesde(idx, alc)
+    lim = alc ? lowCercano(mv) : highCercano(mv)
+    bx  = box.new(idx, top, bar_index, bot, border_color = color.new(c, 0), bgcolor = c, extend = extend.right, text = "OB 1m", text_size = size.tiny, text_color = color.new(c, 0), text_halign = text.align_left)
+    ln  = line.new(idx, lim, bar_index, lim, color = color.red, width = 1, extend = extend.right)
+    OB1.new(top, bot, alc, bx = bx, ext = lim, lim = lim, ln = ln)
+
 // =====================================================================
 // LÓGICA (solo en 1 minuto)
 // =====================================================================
@@ -69,6 +101,24 @@ entradaCompra = false
 entradaVenta  = false
 
 if esM1
+    // Lows/highs de 1m: se quitan los que esta vela rompe y se agregan los nuevos confirmados
+    if lows1.size() > 0
+        for i = lows1.size() - 1 to 0
+            if low < lows1.get(i)
+                lows1.remove(i)
+    if highs1.size() > 0
+        for i = highs1.size() - 1 to 0
+            if high > highs1.get(i)
+                highs1.remove(i)
+    if not na(pl1)
+        lows1.push(pl1)
+    if not na(ph1)
+        highs1.push(ph1)
+    while lows1.size() > 50
+        lows1.shift()
+    while highs1.size() > 50
+        highs1.shift()
+
     // 1) Operaciones abiertas: se cierran al tocar el TP o el SL (si toca los dos en la misma vela, cuenta como SL)
     if abiertas.size() > 0
         for i = abiertas.size() - 1 to 0
@@ -91,7 +141,7 @@ if esM1
                 abiertas.remove(i)
 
     // 2) OB activos: el precio vuelve a tocar el cuerpo y la primera vela que cierra más allá es la entrada.
-    //    El OB solo se invalida si una vela CIERRA más allá del low (compra) / high (venta) que dejó, no del cuerpo.
+    //    El OB solo se invalida si una vela CIERRA más allá del low (compra) / high (venta) más cercano, no del cuerpo.
     entro = false
     if obs.size() > 0
         for i = obs.size() - 1 to 0
@@ -132,22 +182,22 @@ if esM1
                 o.tocado := o.tocado or toca
             if borrar
                 o.bx.delete()
+                o.ln.delete()
                 obs.remove(i)
 
     // 3) OB nuevos: última vela contraria antes del movimiento; se crea cuando una vela cierra más allá de su apertura (cuerpo)
     // OB alcista: una vela cierra por encima de la apertura de la última vela roja
     if not na(rojaIdx) and close > rojaO
-        bx = box.new(rojaIdx, rojaO, bar_index, rojaC, border_color = color.new(colUp, 0), bgcolor = colUp, extend = extend.right, text = "OB", text_size = size.tiny, text_color = color.new(colUp, 0), text_halign = text.align_left)
-        obs.push(OB1.new(rojaO, rojaC, true, bx = bx, ext = extremoDesde(rojaIdx, true), lim = extremoDesde(rojaIdx, true)))
+        obs.push(nuevoOB1(true, rojaO, rojaC, rojaIdx, colUp))
         rojaIdx := na
     // OB bajista: una vela cierra por debajo de la apertura de la última vela verde
     if not na(verdeIdx) and close < verdeO
-        bx = box.new(verdeIdx, verdeC, bar_index, verdeO, border_color = color.new(colDn, 0), bgcolor = colDn, extend = extend.right, text = "OB", text_size = size.tiny, text_color = color.new(colDn, 0), text_halign = text.align_left)
-        obs.push(OB1.new(verdeC, verdeO, false, bx = bx, ext = extremoDesde(verdeIdx, false), lim = extremoDesde(verdeIdx, false)))
+        obs.push(nuevoOB1(false, verdeC, verdeO, verdeIdx, colDn))
         verdeIdx := na
     while obs.size() > maxOb
         old = obs.shift()
         old.bx.delete()
+        old.ln.delete()
 
     // Guarda la última vela roja y la última vela verde
     if close < open
