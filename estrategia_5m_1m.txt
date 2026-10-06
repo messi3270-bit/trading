@@ -345,6 +345,7 @@ type OB1
     int   dentro = 0
     box   bx
     float ext             // low (compra) o high (venta) que dejó el OB, desde su vela hasta ahora
+    float lim             // low (compra) o high (venta) que dejó el OB al crearse: si una vela CIERRA más allá, el OB se invalida
 
 type Operacion
     line  lEnt
@@ -486,14 +487,15 @@ if esM1
     while usadasM.size() > 300
         usadasM.shift()
 
-    // 4) OB de 1m: el precio vuelve a tocarlo y la primera vela que cierra más allá del cuerpo es la entrada
+    // 4) OB de 1m: el precio vuelve a tocarlo y la primera vela que cierra más allá del cuerpo es la entrada.
+    //    El OB solo se invalida si una vela CIERRA más allá del low (compra) / high (venta) que dejó, no del cuerpo.
     entro = false
     if obs1.size() > 0
         for i = obs1.size() - 1 to 0
             o = obs1.get(i)
             o.ext := o.alcista ? math.min(o.ext, low) : math.max(o.ext, high)
             toca     = o.alcista ? low <= o.top : high >= o.bot
-            invalida = o.alcista ? close < o.bot : close > o.top
+            invalida = o.alcista ? close < o.lim : close > o.lim
             o.dentro := (low <= o.top and high >= o.bot) ? o.dentro + 1 : o.dentro
             entra    = (o.tocado or toca) and (o.alcista ? close > o.top : close < o.bot)
             borrar   = false
@@ -534,13 +536,13 @@ if esM1
     if not na(rojaIdx) and close > rojaO
         if not na(busq) and busq.dir == 1
             bx = box.new(rojaIdx, rojaO, bar_index, rojaC, border_color = color.new(col1Up, 0), bgcolor = col1Up, extend = extend.right, text = "OB 1m", text_size = size.tiny, text_color = color.new(col1Up, 0), text_halign = text.align_left)
-            obs1.push(OB1.new(rojaO, rojaC, true, bx = bx, ext = extremoDesde(rojaIdx, true)))
+            obs1.push(OB1.new(rojaO, rojaC, true, bx = bx, ext = extremoDesde(rojaIdx, true), lim = extremoDesde(rojaIdx, true)))
             logE("OB 1m alcista creado")
         rojaIdx := na
     if not na(verdeIdx) and close < verdeO
         if not na(busq) and busq.dir == -1
             bx = box.new(verdeIdx, verdeC, bar_index, verdeO, border_color = color.new(col1Dn, 0), bgcolor = col1Dn, extend = extend.right, text = "OB 1m", text_size = size.tiny, text_color = color.new(col1Dn, 0), text_halign = text.align_left)
-            obs1.push(OB1.new(verdeC, verdeO, false, bx = bx, ext = extremoDesde(verdeIdx, false)))
+            obs1.push(OB1.new(verdeC, verdeO, false, bx = bx, ext = extremoDesde(verdeIdx, false), lim = extremoDesde(verdeIdx, false)))
             logE("OB 1m bajista creado")
         verdeIdx := na
 

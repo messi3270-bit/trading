@@ -28,6 +28,7 @@ type OB1
     int   dentro = 0       // velas que han tocado el cuerpo (aunque no sean seguidas)
     box   bx
     float ext              // low (compra) o high (venta) que dejó el OB, desde su vela hasta ahora
+    float lim             // low (compra) o high (venta) que dejó el OB al crearse: si una vela CIERRA más allá, el OB se invalida
 
 type Operacion
     line  lEnt
@@ -89,7 +90,8 @@ if esM1
                 op.eSl.delete()
                 abiertas.remove(i)
 
-    // 2) OB activos: el precio vuelve a tocar el cuerpo y la primera vela que cierra más allá es la entrada
+    // 2) OB activos: el precio vuelve a tocar el cuerpo y la primera vela que cierra más allá es la entrada.
+    //    El OB solo se invalida si una vela CIERRA más allá del low (compra) / high (venta) que dejó, no del cuerpo.
     entro = false
     if obs.size() > 0
         for i = obs.size() - 1 to 0
@@ -97,7 +99,7 @@ if esM1
             // El stop sigue el low (compra) o high (venta) que dejó el OB, hasta la vela de entrada
             o.ext := o.alcista ? math.min(o.ext, low) : math.max(o.ext, high)
             toca     = o.alcista ? low <= o.top : high >= o.bot
-            invalida = o.alcista ? close < o.bot : close > o.top
+            invalida = o.alcista ? close < o.lim : close > o.lim
             enZona   = low <= o.top and high >= o.bot
             o.dentro := enZona ? o.dentro + 1 : o.dentro
             entra    = (o.tocado or toca) and (o.alcista ? close > o.top : close < o.bot)
@@ -136,12 +138,12 @@ if esM1
     // OB alcista: una vela cierra por encima de la apertura de la última vela roja
     if not na(rojaIdx) and close > rojaO
         bx = box.new(rojaIdx, rojaO, bar_index, rojaC, border_color = color.new(colUp, 0), bgcolor = colUp, extend = extend.right, text = "OB", text_size = size.tiny, text_color = color.new(colUp, 0), text_halign = text.align_left)
-        obs.push(OB1.new(rojaO, rojaC, true, bx = bx, ext = extremoDesde(rojaIdx, true)))
+        obs.push(OB1.new(rojaO, rojaC, true, bx = bx, ext = extremoDesde(rojaIdx, true), lim = extremoDesde(rojaIdx, true)))
         rojaIdx := na
     // OB bajista: una vela cierra por debajo de la apertura de la última vela verde
     if not na(verdeIdx) and close < verdeO
         bx = box.new(verdeIdx, verdeC, bar_index, verdeO, border_color = color.new(colDn, 0), bgcolor = colDn, extend = extend.right, text = "OB", text_size = size.tiny, text_color = color.new(colDn, 0), text_halign = text.align_left)
-        obs.push(OB1.new(verdeC, verdeO, false, bx = bx, ext = extremoDesde(verdeIdx, false)))
+        obs.push(OB1.new(verdeC, verdeO, false, bx = bx, ext = extremoDesde(verdeIdx, false), lim = extremoDesde(verdeIdx, false)))
         verdeIdx := na
     while obs.size() > maxOb
         old = obs.shift()
