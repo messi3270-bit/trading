@@ -1,0 +1,178 @@
+//@version=6
+indicator("OB 1m · Entradas (solo 1 minuto)", shorttitle = "OB 1m", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500, max_bars_back = 500)
+
+// =====================================================================
+// AJUSTES
+// =====================================================================
+grpE      = "Entrada"
+margenSl  = input.float(0.3, "Margen del stop loss más allá del high/low que deja el OB (dólares; 3 pips = 0,30; 0 = justo en el high/low)", minval = 0.0, step = 0.1, group = grpE)
+ratio     = input.float(3.0, "Take profit (veces el riesgo; 3 = 1:3)", minval = 0.5, step = 0.5, group = grpE)
+unaVez    = input.bool(true, "Solo una operación abierta a la vez", group = grpE)
+maxDentro = input.int(4, "OB: máximo de velas que lo tocan (aunque no sean seguidas; si hay más, se invalida)", minval = 1, group = grpE)
+
+grpO      = "Order Blocks"
+maxOb     = input.int(10, "Máximo de OB activos en pantalla", minval = 1, group = grpO)
+colUp     = input.color(color.new(#FF9800, 80), "OB alcista", group = grpO)
+colDn     = input.color(color.new(#E65100, 80), "OB bajista", group = grpO)
+
+esM1 = timeframe.period == "1"
+
+// =====================================================================
+// TIPOS
+// =====================================================================
+type OB1
+    float top
+    float bot
+    bool  alcista
+    bool  tocado = false   // una vela anterior ya tocó el cuerpo
+    int   dentro = 0       // velas que han tocado el cuerpo (aunque no sean seguidas)
+    box   bx
+    float ext              // low (compra) o high (venta) que dejó el OB, desde su vela hasta ahora
+
+type Operacion
+    line  lEnt
+    line  lTp
+    line  lSl
+    label eEnt
+    label eTp
+    label eSl
+    float tp
+    float sl
+    bool  compra
+    label marca            // marca que se queda en el historial (▲/▼ con ✓ o ✗)
+
+var array<OB1>       obs     = array.new<OB1>()
+var array<Operacion> abiertas = array.new<Operacion>()
+var int ganadas  = 0
+var int perdidas = 0
+
+// Mínimo (o máximo) desde la vela "idx" hasta la vela actual
+extremoDesde(int idx, bool minimo) =>
+    float e = na
+    int n = math.min(bar_index - idx, 400)
+    for k = 0 to n
+        e := na(e) ? (minimo ? low[k] : high[k]) : (minimo ? math.min(e, low[k]) : math.max(e, high[k]))
+    e
+
+// =====================================================================
+// LÓGICA (solo en 1 minuto)
+// =====================================================================
+var int   rojaIdx  = na
+var float rojaO    = na
+var float rojaC    = na
+var int   verdeIdx = na
+var float verdeO   = na
+var float verdeC   = na
+
+entradaCompra = false
+entradaVenta  = false
+
+if esM1
+    // 1) Operaciones abiertas: se cierran al tocar el TP o el SL (si toca los dos en la misma vela, cuenta como SL)
+    if abiertas.size() > 0
+        for i = abiertas.size() - 1 to 0
+            op     = abiertas.get(i)
+            tocaSl = op.compra ? low <= op.sl : high >= op.sl
+            tocaTp = op.compra ? high >= op.tp : low <= op.tp
+            if tocaSl or tocaTp
+                if tocaSl
+                    perdidas += 1
+                else
+                    ganadas += 1
+                op.marca.set_text((op.compra ? "▲" : "▼") + (tocaSl ? " ✗" : " ✓"))
+                op.marca.set_color(tocaSl ? color.red : color.green)
+                op.lEnt.delete()
+                op.lTp.delete()
+                op.lSl.delete()
+                op.eEnt.delete()
+                op.eTp.delete()
+                op.eSl.delete()
+                abiertas.remove(i)
+
+    // 2) OB activos: el precio vuelve a tocar el cuerpo y la primera vela que cierra más allá es la entrada
+    entro = false
+    if obs.size() > 0
+        for i = obs.size() - 1 to 0
+            o = obs.get(i)
+            // El stop sigue el low (compra) o high (venta) que dejó el OB, hasta la vela de entrada
+            o.ext := o.alcista ? math.min(o.ext, low) : math.max(o.ext, high)
+            toca     = o.alcista ? low <= o.top : high >= o.bot
+            invalida = o.alcista ? close < o.bot : close > o.top
+            enZona   = low <= o.top and high >= o.bot
+            o.dentro := enZona ? o.dentro + 1 : o.dentro
+            entra    = (o.tocado or toca) and (o.alcista ? close > o.top : close < o.bot)
+            borrar   = false
+            if invalida or o.dentro > maxDentro
+                borrar := true
+            else if entra
+                if unaVez and abiertas.size() > 0
+                    // Ya hay una operación abierta: este OB se descarta
+                    borrar := true
+                else
+                    sl     = o.alcista ? o.ext - margenSl : o.ext + margenSl
+                    riesgo = o.alcista ? close - sl : sl - close
+                    if riesgo > 0
+                        tp   = o.alcista ? close + ratio * riesgo : close - ratio * riesgo
+                        lEnt = line.new(bar_index, close, bar_index + 1, close, color = color.blue, width = 2, extend = extend.right)
+                        lTp  = line.new(bar_index, tp, bar_index + 1, tp, color = color.green, width = 2, extend = extend.right)
+                        lSl  = line.new(bar_index, sl, bar_index + 1, sl, color = color.red, width = 2, extend = extend.right)
+                        eEnt = label.new(bar_index, close, (o.alcista ? "COMPRA " : "VENTA ") + str.tostring(close, format.mintick), style = label.style_label_right, color = color.blue, textcolor = color.white, size = size.small)
+                        eTp  = label.new(bar_index, tp, "TP " + str.tostring(tp, format.mintick), style = label.style_label_right, color = color.green, textcolor = color.white, size = size.small)
+                        eSl  = label.new(bar_index, sl, "SL " + str.tostring(sl, format.mintick), style = label.style_label_right, color = color.red, textcolor = color.white, size = size.small)
+                        tip  = (o.alcista ? "COMPRA" : "VENTA") + "\nEntrada: " + str.tostring(close, format.mintick) + "\nSL: " + str.tostring(sl, format.mintick) + "\nTP: " + str.tostring(tp, format.mintick) + "\nOB: " + str.tostring(o.bot, format.mintick) + " – " + str.tostring(o.top, format.mintick)
+                        marca = label.new(bar_index, o.alcista ? low : high, o.alcista ? "▲" : "▼", style = o.alcista ? label.style_label_up : label.style_label_down, color = color.blue, textcolor = color.white, size = size.tiny, tooltip = tip)
+                        abiertas.push(Operacion.new(lEnt, lTp, lSl, eEnt, eTp, eSl, tp, sl, o.alcista, marca))
+                        entradaCompra := o.alcista
+                        entradaVenta  := not o.alcista
+                        entro := true
+                    borrar := true
+            else
+                o.tocado := o.tocado or toca
+            if borrar
+                o.bx.delete()
+                obs.remove(i)
+            if entro
+                break
+
+    // 3) OB nuevos: última vela contraria antes del movimiento; se crea cuando una vela cierra más allá de su apertura (cuerpo)
+    // OB alcista: una vela cierra por encima de la apertura de la última vela roja
+    if not na(rojaIdx) and close > rojaO
+        bx = box.new(rojaIdx, rojaO, bar_index, rojaC, border_color = color.new(colUp, 0), bgcolor = colUp, extend = extend.right, text = "OB", text_size = size.tiny, text_color = color.new(colUp, 0), text_halign = text.align_left)
+        obs.push(OB1.new(rojaO, rojaC, true, bx = bx, ext = extremoDesde(rojaIdx, true)))
+        rojaIdx := na
+    // OB bajista: una vela cierra por debajo de la apertura de la última vela verde
+    if not na(verdeIdx) and close < verdeO
+        bx = box.new(verdeIdx, verdeC, bar_index, verdeO, border_color = color.new(colDn, 0), bgcolor = colDn, extend = extend.right, text = "OB", text_size = size.tiny, text_color = color.new(colDn, 0), text_halign = text.align_left)
+        obs.push(OB1.new(verdeC, verdeO, false, bx = bx, ext = extremoDesde(verdeIdx, false)))
+        verdeIdx := na
+    while obs.size() > maxOb
+        old = obs.shift()
+        old.bx.delete()
+
+    // Guarda la última vela roja y la última vela verde
+    if close < open
+        rojaIdx := bar_index
+        rojaO   := open
+        rojaC   := close
+    if close > open
+        verdeIdx := bar_index
+        verdeO   := open
+        verdeC   := close
+
+// =====================================================================
+// PANEL
+// =====================================================================
+var table panel = table.new(position.top_right, 1, 4, border_width = 1)
+if barstate.islast
+    if esM1
+        total = ganadas + perdidas
+        est = abiertas.size() > 0 ? "Operación abierta (" + (abiertas.get(0).compra ? "COMPRA" : "VENTA") + ")" : "Esperando entrada (OB activos: " + str.tostring(obs.size()) + ")"
+        table.cell(panel, 0, 0, "OB 1m", bgcolor = color.new(color.black, 20), text_color = color.white, text_size = size.normal)
+        table.cell(panel, 0, 1, est, bgcolor = color.new(color.black, 20), text_color = color.white, text_size = size.small)
+        table.cell(panel, 0, 2, "✓ " + str.tostring(ganadas) + "   ✗ " + str.tostring(perdidas), bgcolor = color.new(color.black, 20), text_color = color.yellow, text_size = size.small)
+        table.cell(panel, 0, 3, total > 0 ? "Acierto: " + str.tostring(100.0 * ganadas / total, "#.#") + " %" : "Acierto: -", bgcolor = color.new(color.black, 20), text_color = color.yellow, text_size = size.small)
+    else
+        table.cell(panel, 0, 0, "Ponlo en el gráfico de 1 minuto", bgcolor = color.new(color.gray, 20), text_color = color.white, text_size = size.small)
+
+alertcondition(entradaCompra, "Entrada COMPRA (1m)", "XAUUSD: entrada de COMPRA en 1 minuto")
+alertcondition(entradaVenta, "Entrada VENTA (1m)", "XAUUSD: entrada de VENTA en 1 minuto")
