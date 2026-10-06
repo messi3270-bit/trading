@@ -27,7 +27,7 @@ grpE      = "1m: Entrada"
 margenSl  = input.float(0.3, "Margen del stop loss más allá del high/low que deja el OB de 1m (dólares; 3 pips = 0,30; 0 = justo en el high/low)", minval = 0.0, step = 0.1, group = grpE)
 ratio     = input.float(3.0, "Take profit (veces el riesgo; 3 = 1:3)", minval = 0.5, step = 0.5, group = grpE)
 unaVez    = input.bool(true, "Solo una operación abierta a la vez (mientras haya una abierta no se busca)", group = grpE)
-pivLen1   = input.int(3, "1m: velas a cada lado para confirmar el low/high más cercano", minval = 1, group = grpE)
+pivLen1   = input.int(3, "1m: low/high más cercano = más bajo/alto que estas velas anteriores y sin romper después", minval = 1, group = grpE)
 col1Up    = input.color(color.new(#4CAF50, 75), "OB 1m alcista", group = grpE)
 col1Dn    = input.color(color.new(#F44336, 75), "OB 1m bajista", group = grpE)
 
@@ -393,32 +393,45 @@ extremoDesde(int idx, bool minimo) =>
         e := na(e) ? (minimo ? low[k] : high[k]) : (minimo ? math.min(e, low[k]) : math.max(e, high[k]))
     e
 
-// Lows y highs de 1m confirmados que todavía no se han roto (ninguna vela ha pasado por debajo / por encima)
-var array<float> lows1  = array.new<float>()
-var array<float> highs1 = array.new<float>()
-pl1 = ta.pivotlow(low, pivLen1, pivLen1)
-ph1 = ta.pivothigh(high, pivLen1, pivLen1)
-
-// Low más cercano: el low sin romper más alto que esté en o por debajo de "ref" (si no hay, "ref")
-lowCercano(float ref) =>
+// Low más cercano: buscando hacia atrás desde la vela actual, el primer low que ninguna vela
+// posterior ha roto (nadie bajó de él) y que es más bajo que las "pivLen1" velas anteriores.
+lowCercano() =>
     float r = na
-    for p in lows1
-        if p <= ref and (na(r) or p > r)
-            r := p
-    na(r) ? ref : r
+    float minDesp = na
+    for k = 0 to 300
+        lk = low[k]
+        if na(minDesp) or lk <= minDesp
+            esLow = true
+            for a = 1 to pivLen1
+                if low[k + a] <= lk
+                    esLow := false
+            if esLow
+                r := lk
+                break
+        minDesp := na(minDesp) ? lk : math.min(minDesp, lk)
+    r
 
-// High más cercano: el high sin romper más bajo que esté en o por encima de "ref" (si no hay, "ref")
-highCercano(float ref) =>
+// High más cercano: lo mismo para ventas
+highCercano() =>
     float r = na
-    for p in highs1
-        if p >= ref and (na(r) or p < r)
-            r := p
-    na(r) ? ref : r
+    float maxDesp = na
+    for k = 0 to 300
+        hk = high[k]
+        if na(maxDesp) or hk >= maxDesp
+            esHigh = true
+            for a = 1 to pivLen1
+                if high[k + a] >= hk
+                    esHigh := false
+            if esHigh
+                r := hk
+                break
+        maxDesp := na(maxDesp) ? hk : math.max(maxDesp, hk)
+    r
 
 // Crea un OB de 1m con su low/high más cercano (línea roja)
 nuevoOB1(bool alc, float top, float bot, int idx, color c) =>
-    mv  = extremoDesde(idx, alc)
-    lim = alc ? lowCercano(mv) : highCercano(mv)
+    lc  = alc ? lowCercano() : highCercano()
+    lim = na(lc) ? extremoDesde(idx, alc) : lc
     bx  = box.new(idx, top, bar_index, bot, border_color = color.new(c, 0), bgcolor = c, extend = extend.right, text = "OB 1m", text_size = size.tiny, text_color = color.new(c, 0), text_halign = text.align_left)
     ln  = line.new(idx, lim, bar_index, lim, color = color.red, width = 1, extend = extend.right)
     OB1.new(top, bot, alc, bx = bx, ext = lim, lim = lim, ln = ln)
@@ -440,24 +453,6 @@ entradaCompra = false
 entradaVenta  = false
 
 if esM1
-    // Lows/highs de 1m: se quitan los que esta vela rompe y se agregan los nuevos confirmados
-    if lows1.size() > 0
-        for i = lows1.size() - 1 to 0
-            if low < lows1.get(i)
-                lows1.remove(i)
-    if highs1.size() > 0
-        for i = highs1.size() - 1 to 0
-            if high > highs1.get(i)
-                highs1.remove(i)
-    if not na(pl1)
-        lows1.push(pl1)
-    if not na(ph1)
-        highs1.push(ph1)
-    while lows1.size() > 50
-        lows1.shift()
-    while highs1.size() > 50
-        highs1.shift()
-
     // 1) Operaciones abiertas: se cierran al tocar el TP o el SL (si toca los dos en la misma vela, cuenta como SL)
     if abiertas.size() > 0
         for i = abiertas.size() - 1 to 0
