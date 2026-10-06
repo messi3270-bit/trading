@@ -15,7 +15,7 @@ grpZ      = "5m: Zonas que activan la búsqueda en 1m"
 usarOb    = input.bool(true, "Order blocks de 5m", group = grpZ)
 usarFvg   = input.bool(true, "Vacíos (FVG) de 5m", group = grpZ)
 usarMan   = input.bool(true, "Manipulaciones de 5m", group = grpZ)
-maxDentro = input.int(4, "OB: máximo de velas que lo tocan (aunque no sean seguidas; si hay más, se invalida)", minval = 1, group = grpZ)
+maxDentro = input.int(4, "OB: se invalida cuando lo tocan estas velas (aunque no sean seguidas; 4 = la 4ª vela que lo toca lo invalida)", minval = 1, group = grpZ)
 maxZonas  = input.int(15, "Máximo de vacíos / OB activos (de cada tipo)", minval = 1, group = grpZ)
 maxNivel  = input.int(30, "Máximo de altos/bajos activos", minval = 2, group = grpZ)
 colFvgUp  = input.color(color.new(#42A5F5, 80), "Vacío alcista", group = grpZ)
@@ -153,13 +153,13 @@ motor5() =>
                 fv.remove(i)
             else
                 z.tocado := toca
-    // OB: reacción al tocar el cuerpo (una sola), invalidación al cerrar al otro lado o si lo tocan más de "maxDentro" velas
+    // OB: reacción al tocar el cuerpo (una sola), invalidación al cerrar al otro lado o cuando lo tocan "maxDentro" velas
     if ob.size() > 0
         for i = ob.size() - 1 to 0
             z    = ob.get(i)
             toca = z.alcista ? low <= z.top : high >= z.bot
             z.dentro := (low <= z.top and high >= z.bot) ? z.dentro + 1 : z.dentro
-            invalida  = (z.alcista ? close < z.bot : close > z.top) or z.dentro > maxDentro
+            invalida  = (z.alcista ? close < z.bot : close > z.top) or z.dentro >= maxDentro
             reacciona = (z.alcista ? close > open : close < open) and (toca or z.tocado)
             if invalida
                 ob.remove(i)
@@ -204,6 +204,7 @@ motor5() =>
     zAlc = array.new<bool>()
     zFvg = array.new<bool>()
     zX   = array.new<int>()
+    zDen = array.new<int>()
     for z in fv
         zId.push(z.id)
         zTop.push(z.top)
@@ -211,6 +212,7 @@ motor5() =>
         zAlc.push(z.alcista)
         zFvg.push(true)
         zX.push(z.x)
+        zDen.push(0)
     for z in ob
         zId.push(z.id)
         zTop.push(z.top)
@@ -218,6 +220,7 @@ motor5() =>
         zAlc.push(z.alcista)
         zFvg.push(false)
         zX.push(z.x)
+        zDen.push(z.dentro)
     nId   = array.new<int>()
     nPre  = array.new<float>()
     nAlto = array.new<bool>()
@@ -236,6 +239,7 @@ motor5() =>
     var array<bool>  pFvg  = array.new<bool>()
     var array<float> pmPre = array.new<float>()
     var array<bool>  pmAlt = array.new<bool>()
+    var array<int>   pDen  = array.new<int>()
     oId   = pId
     oTop  = pTop
     oBot  = pBot
@@ -243,6 +247,7 @@ motor5() =>
     oFvg  = pFvg
     omPre = pmPre
     omAlt = pmAlt
+    oDen  = pDen
     pId   := zId
     pTop  := zTop
     pBot  := zBot
@@ -250,13 +255,14 @@ motor5() =>
     pFvg  := zFvg
     pmPre := mPre
     pmAlt := mAlto
-    [zId, zTop, zBot, zAlc, zFvg, zX, nId, nPre, nAlto, nX, mId, mPre, mAlto, eAlc, eFvg, oId, oTop, oBot, oAlc, oFvg, omPre, omAlt]
+    pDen  := zDen
+    [zId, zTop, zBot, zAlc, zFvg, zX, nId, nPre, nAlto, nX, mId, mPre, mAlto, eAlc, eFvg, oId, oTop, oBot, oAlc, oFvg, omPre, omAlt, oDen]
 
 // Estado de 5m en el propio gráfico (para dibujar en 5m)
-[zId, zTop, zBot, zAlc, zFvg, zX, nId, nPre, nAlto, nX, mId, mPre, mAlto, eAlc, eFvg, q1, q2, q3, q4, q5, q6, q7] = motor5()
+[zId, zTop, zBot, zAlc, zFvg, zX, nId, nPre, nAlto, nX, mId, mPre, mAlto, eAlc, eFvg, q1, q2, q3, q4, q5, q6, q7, q8] = motor5()
 
 // Foto de la última vela CERRADA de 5m (para buscar entradas en 1m)
-[w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12, w13, w14, w15, sId, sTop, sBot, sAlc, sFvg, smPre, smAlto] = request.security(syminfo.tickerid, "5", motor5(), lookahead = barmerge.lookahead_on)
+[w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12, w13, w14, w15, sId, sTop, sBot, sAlc, sFvg, smPre, smAlto, sDen] = request.security(syminfo.tickerid, "5", motor5(), lookahead = barmerge.lookahead_on)
 
 // =====================================================================
 // DIBUJO EN 5 MINUTOS
@@ -335,7 +341,7 @@ type Busqueda
     float bot
     float nivel
     box   bx
-    int   dentro5 = 0     // OB: velas de 5m que han tocado la zona
+    int   dentro5 = 0     // OB: velas de 5m que han tocado la zona (incluye las de antes de la búsqueda)
     int   fuera5  = 0     // manipulación: velas de 5m seguidas cerradas fuera del nivel
 
 type OB1
@@ -479,9 +485,9 @@ if esM1
     if nueva5 and not na(v5c) and not na(busq)
         rota = false
         if busq.tipo == 0
-            // OB: una vela de 5m cierra al otro lado, o lo tocan más de "maxDentro" velas de 5m
+            // OB: una vela de 5m cierra al otro lado, o ya lo han tocado "maxDentro" velas de 5m
             busq.dentro5 := (v5l <= busq.top and v5h >= busq.bot) ? busq.dentro5 + 1 : busq.dentro5
-            rota := (busq.dir == 1 ? v5c < busq.bot : v5c > busq.top) or busq.dentro5 > maxDentro
+            rota := (busq.dir == 1 ? v5c < busq.bot : v5c > busq.top) or busq.dentro5 >= maxDentro
         else if busq.tipo == 1
             // Vacío: una vela de 5m cierra al otro lado
             rota := busq.dir == 1 ? v5c < busq.bot : v5c > busq.top
@@ -515,6 +521,8 @@ if esM1
                         c  = alc ? color.green : color.red
                         bx = box.new(bar_index, t, bar_index + 1, b, border_color = color.new(c, 30), bgcolor = color.new(c, 90), extend = extend.right, text = descZona(tp, d, t, b), text_size = size.tiny, text_color = color.new(c, 0), text_halign = text.align_right)
                         busq := Busqueda.new(d, tp, t, b, na, bx)
+                        // OB: las velas de 5m que ya lo tocaron antes también cuentan
+                        busq.dentro5 := sDen.get(k)
                         logE("Toca " + descZona(tp, d, t, b) + ": busca " + (d == 1 ? "COMPRA" : "VENTA"))
     // Manipulación confirmada en 5m (en la última vela cerrada de 5m)
     if usarMan and na(busq) and libreOp and not na(smPre)
@@ -533,6 +541,17 @@ if esM1
     while usadasM.size() > 300
         usadasM.shift()
 
+    // 3b) OB de 5m: la vela de 5m que se está formando cuenta en cuanto toca el OB.
+    //     Si con ella ya son "maxDentro" velas tocándolo, el OB es inválido y se termina la búsqueda.
+    if not na(busq) and busq.tipo == 0
+        h5 = nueva5 or na(v5h) ? high : math.max(v5h, high)
+        l5 = nueva5 or na(v5l) ? low : math.min(v5l, low)
+        if busq.dentro5 + ((l5 <= busq.top and h5 >= busq.bot) ? 1 : 0) >= maxDentro
+            logE("OB de 5m tocado por " + str.tostring(maxDentro) + " velas: inválido")
+            busq.bx.delete()
+            busq := na
+            limpiarObs1()
+
     // 4) OB de 1m: el precio vuelve a tocarlo y la primera vela que cierra más allá del cuerpo es la entrada.
     //    El OB solo se invalida si una vela CIERRA más allá del low (compra) / high (venta) más cercano, no del cuerpo.
     entro = false
@@ -545,7 +564,7 @@ if esM1
             o.dentro := (low <= o.top and high >= o.bot) ? o.dentro + 1 : o.dentro
             entra    = (o.tocado or toca) and (o.alcista ? close > o.top : close < o.bot)
             borrar   = false
-            if invalida or o.dentro > maxDentro
+            if invalida or o.dentro >= maxDentro
                 logE("OB 1m invalidado")
                 borrar := true
             else if entra and not entro and not na(busq) and busq.dir == (o.alcista ? 1 : -1)

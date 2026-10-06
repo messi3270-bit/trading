@@ -8,7 +8,7 @@ grpE      = "Entrada"
 margenSl  = input.float(0.3, "Margen del stop loss más allá del high/low que deja el OB (dólares; 3 pips = 0,30; 0 = justo en el high/low)", minval = 0.0, step = 0.1, group = grpE)
 ratio     = input.float(3.0, "Take profit (veces el riesgo; 3 = 1:3)", minval = 0.5, step = 0.5, group = grpE)
 unaVez    = input.bool(true, "Solo una operación abierta a la vez", group = grpE)
-maxDentro = input.int(4, "OB: máximo de velas que lo tocan (aunque no sean seguidas; si hay más, se invalida)", minval = 1, group = grpE)
+maxDentro = input.int(4, "OB: se invalida cuando lo tocan estas velas (aunque no sean seguidas; 4 = la 4ª vela que lo toca lo invalida)", minval = 1, group = grpE)
 pivLen1   = input.int(3, "1m: low/high más cercano = más bajo/alto que estas velas anteriores y sin romper después", minval = 1, group = grpE)
 
 grpO      = "Order Blocks"
@@ -149,7 +149,7 @@ if esM1
             o.dentro := enZona ? o.dentro + 1 : o.dentro
             entra    = (o.tocado or toca) and (o.alcista ? close > o.top : close < o.bot)
             borrar   = false
-            if invalida or o.dentro > maxDentro
+            if invalida or o.dentro >= maxDentro
                 borrar := true
             else if entra
                 if entro or (unaVez and abiertas.size() > 0)
